@@ -5,33 +5,17 @@ class GridWorld:
         self.width = width
         self.height = height
         self.grid = [[None for _ in range(width)] for _ in range(height)]
+        self.resource_locations = {
+            'Iron': [(5, 5), (45, 45)],
+            'Fuel': [(5, 45), (45, 5)],
+            'Copper': [(15, 10), (35, 40)],
+            'Stone': [(10, 25), (40, 25)],
+            'Wood': [(20, 20), (30, 30)]
+        }
         self.populate_grid()
     
     def populate_grid(self):
-        resource_locations = {
-            'Iron': [
-                (5, 5),     # Top-left quadrant
-                (45, 45)    # Bottom-right quadrant
-            ],
-            'Fuel': [
-                (5, 45),    # Bottom-left quadrant
-                (45, 5)     # Top-right quadrant
-            ],
-            'Copper': [
-                (15, 10),   # Left-central area
-                (35, 40)    # Right-central area
-            ],
-            'Stone': [
-                (10, 25),   # Left-center
-                (40, 25)    # Right-center
-            ],
-            'Wood': [
-                (20, 20),   # Upper-middle
-                (30, 30)    # Lower-middle
-            ]
-        }
-        
-        for item, positions in resource_locations.items():
+        for item, positions in self.resource_locations.items():
             for x, y in positions:
                 self.grid[y][x] = item
 
@@ -52,7 +36,7 @@ class GridWorld:
         return False
 
 class Agent:
-    def __init__(self, x=25, y=25):  # Starts at center
+    def __init__(self, x=25, y=25):
         self.x = x
         self.y = y
         self.inventory = []
@@ -69,11 +53,9 @@ class Agent:
     def collect_item(self, grid):
         if len(self.inventory) >= self.max_inventory:
             return False, "Backpack full!"
-        
         items = grid.get_cell_items(self.x, self.y)
         if not items:
             return False, "No items here!"
-        
         item = grid.remove_item(self.x, self.y)
         if item:
             self.inventory.append(item)
@@ -97,7 +79,6 @@ class RecipeBook:
             frozenset(['Hybrid_Drive', 'Wood']): 'Aerial_Transport',
             frozenset(['Basic_Engine', 'Wood']): 'Reinforced_Frame'
         }
-        
         self.decompose_recipes = {
             'Basic_Engine': ['Iron', 'Fuel'],
             'Thermal_Core': ['Copper', 'Stone'],
@@ -121,30 +102,27 @@ class Game:
     def find_nearby_item(self, item_name):
         CAPTURE_RANGE = 5
         targets = []
-        
-        for y in range(self.grid.height):
-            for x in range(self.grid.width):
-                if self.grid.grid[y][x] == item_name:
-                    distance = abs(x - self.agent.x) + abs(y - self.agent.y)
-                    if distance <= CAPTURE_RANGE:
-                        targets.append((x, y, distance))
-        
-        if not targets:
-            return None
-        return min(targets, key=lambda t: t[2])
+        for x, y in self.grid.resource_locations.get(item_name, []):
+            distance = abs(x - self.agent.x) + abs(y - self.agent.y)
+            if distance <= CAPTURE_RANGE:
+                targets.append((x, y, distance))
+        return min(targets, key=lambda t: t[2]) if targets else None
 
     def capture_item(self, item_name):
         target = self.find_nearby_item(item_name)
         if not target:
             return False, f"No {item_name} within 5 cells"
-        
         target_x, target_y, _ = target
         self.agent.x, self.agent.y = target_x, target_y
         success, msg = self.agent.collect_item(self.grid)
-        
-        if not success:
-            return False, f"Capture failed: {msg}"
-        return True, f"Captured {item_name} at ({target_x}, {target_y})"
+        return (success, msg) if success else (False, f"Capture failed: {msg}")
+
+    def get_capturable_items(self):
+        capturable = set()
+        for item in self.grid.resource_locations:
+            if self.find_nearby_item(item):
+                capturable.add(item)
+        return sorted(capturable)
 
     def print_grid(self):
         print("\nLocal View (5x5 around agent):")
@@ -152,7 +130,6 @@ class Game:
         max_y = min(self.grid.height, self.agent.y+3)
         min_x = max(0, self.agent.x-2)
         max_x = min(self.grid.width, self.agent.x+3)
-        
         for y in range(min_y, max_y):
             row = []
             for x in range(min_x, max_x):
@@ -166,112 +143,73 @@ class Game:
     def print_status(self):
         self.print_grid()
         print(f"\nPosition: ({self.agent.x}, {self.agent.y})")
-        cell_items = self.grid.get_cell_items(self.agent.x, self.agent.y)
-        print(f"Current cell item: {cell_items[0] if cell_items else 'Empty'}")
         print(f"Inventory ({len(self.agent.inventory)}/{self.agent.max_inventory}):")
         for item in self.agent.inventory:
             print(f"- {item}")
+        capturable = self.get_capturable_items()
+        print("\nItems within capture range (5 cells):", 
+              ', '.join(capturable) if capturable else "None")
 
     def combine_items(self, items):
-        items_set = set(items)
-        combined = self.recipes.get_combination(items_set)
+        combined = self.recipes.get_combination(set(items))
         if not combined:
             return False, "No recipe for these items"
-        
         temp_inv = self.agent.inventory.copy()
         try:
             for item in items:
                 temp_inv.remove(item)
         except ValueError:
-            return False, "Missing required items"
-        
+            return False, "Missing items"
         if len(temp_inv) + 1 > self.agent.max_inventory:
-            return False, "Not enough space in backpack"
-        
-        self.agent.inventory = temp_inv
-        self.agent.inventory.append(combined)
+            return False, "Inventory full"
+        self.agent.inventory = temp_inv + [combined]
         return True, f"Created {combined}!"
-    
+
     def decompose_item(self, item):
         components = self.recipes.get_decomposition(item)
         if not components:
-            return False, "Can't decompose this item"
-        
+            return False, "Can't decompose"
         if item not in self.agent.inventory:
-            return False, "Item not in inventory"
-        
-        new_size = len(self.agent.inventory) - 1 + len(components)
-        if new_size > self.agent.max_inventory:
-            return False, "Not enough space to decompose"
-        
+            return False, "Not in inventory"
+        if len(self.agent.inventory) + len(components) - 1 > self.agent.max_inventory:
+            return False, "Not enough space"
         self.agent.inventory.remove(item)
         self.agent.inventory.extend(components)
-        return True, f"Decomposed into {components}"
+        return True, f"Decomposed into {', '.join(components)}"
 
     def run(self):
         print("Welcome to Crafting World!")
         print("Available actions: move, collect, combine, break, put, capture, quit")
-        print("Agent starts at center (25,25)")
-        print("Item Positions:")
-        print("- Iron: (5,5) and (45,45)")
-        print("- Fuel: (5,45) and (45,5)")
-        print("- Copper: (15,10) and (35,40)")
-        print("- Stone: (10,25) and (40,25)")
-        print("- Wood: (20,20) and (30,30)")
-        
         while True:
             self.print_status()
-            action = input("\nWhat would you like to do? ").lower().strip()
+            action = input("\nAction: ").lower().strip()
             
             if action == 'quit':
                 print("Thanks for playing!")
                 break
-            
             elif action == 'move':
                 dir_map = {'n': (0, -1), 's': (0, 1), 'e': (1, 0), 'w': (-1, 0)}
                 direction = input("Direction (n/s/e/w)? ").lower().strip()
                 if direction in dir_map:
                     dx, dy = dir_map[direction]
-                    if self.agent.move(dx, dy, self.grid):
-                        print(f"Moved {direction}")
-                    else:
-                        print("Can't move there!")
-                else:
-                    print("Invalid direction!")
-            
+                    print("Moved", direction if self.agent.move(dx, dy, self.grid) else "Can't move there")
+                else: print("Invalid direction")
             elif action == 'collect':
-                success, msg = self.agent.collect_item(self.grid)
-                print(msg)
-            
+                print(self.agent.collect_item(self.grid)[1])
             elif action == 'combine':
-                items = input("Items to combine (space-separated): ").split()
-                success, msg = self.combine_items(items)
-                print(msg)
-            
+                items = input("Items to combine: ").split()
+                print(self.combine_items(items)[1])
             elif action == 'break':
-                item = input("Item to break down: ").strip()
-                success, msg = self.decompose_item(item)
-                print(msg)
-            
+                print(self.decompose_item(input("Item to decompose: ").strip())[1])
             elif action == 'put':
-                if not self.agent.inventory:
-                    print("Inventory is empty!")
-                    continue
-                item = input("Item to place: ").strip()
-                success, msg = self.agent.drop_item(self.grid, item)
-                print(msg)
-            
+                print(self.agent.drop_item(self.grid, input("Item to place: ").strip())[1])
             elif action == 'capture':
                 if len(self.agent.inventory) >= self.agent.max_inventory:
-                    print("Inventory full - cannot capture")
-                    continue
-                item = input("Item to capture: ").strip()
-                success, msg = self.capture_item(item)
-                print(msg)
-            
+                    print("Inventory full")
+                else:
+                    print(self.capture_item(input("Item to capture: ").strip())[1])
             else:
-                print("Invalid action!")
+                print("Invalid command")
 
 if __name__ == "__main__":
-    game = Game()
-    game.run()
+    Game().run()
