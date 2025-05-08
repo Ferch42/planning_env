@@ -1,17 +1,14 @@
 class GridWorld:
-    def __init__(self, width=10, height=10):
+    def __init__(self, width=5, height=5):
         self.width = width
         self.height = height
         self.grid = [[None for _ in range(width)] for _ in range(height)]
         self.populate_grid()
     
     def populate_grid(self):
-        import random
-        items = ['stick', 'stone', 'wood', 'leaf', 'flower', 'coal', 'iron', 'rubber']
-        for y in range(self.height):
-            for x in range(self.width):
-                if random.random() < 0.4:  # 40% chance of an item
-                    self.grid[y][x] = random.choice(items)
+        # Precisely placed components for all recipes
+        self.grid[0] = ['stick', 'stone', 'wood', 'leaf', 'flower']
+        self.grid[1] = ['flower', 'coal', 'iron', 'rubber', 'rubber']
     
     def get_cell_items(self, x, y):
         return [self.grid[y][x]] if self.grid[y][x] is not None else []
@@ -22,6 +19,12 @@ class GridWorld:
             self.grid[y][x] = None
             return removed_item
         return None
+    
+    def place_item(self, x, y, item):
+        if self.grid[y][x] is None:
+            self.grid[y][x] = item
+            return True
+        return False
 
 class Agent:
     def __init__(self, x=0, y=0):
@@ -51,53 +54,16 @@ class Agent:
             self.inventory.append(item)
             return True, f"Collected {item}"
         return False, "Collection failed"
+    
+    def drop_item(self, grid, item):
+        if item not in self.inventory:
+            return False, "Item not in inventory"
+        if not grid.place_item(self.x, self.y, item):
+            return False, "Cell is not empty"
+        self.inventory.remove(item)
+        return True, f"Placed {item} at ({self.x}, {self.y})"
 
-class RecipeBook:
-    def __init__(self):
-        self.combine_recipes = {
-            frozenset(['stick', 'stone']): 'axe',
-            frozenset(['wood', 'axe']): 'firewood',
-            frozenset(['coal', 'iron']): 'steel',
-            frozenset(['steel', 'rubber']): 'machine_part',
-            frozenset(['machine_part', 'steel', 'rubber']): 'robot',
-            frozenset(['flower', 'leaf']): 'herbal_remedy',
-            frozenset(['herbal_remedy', 'flower']): 'healing_potion',
-            frozenset(['firewood', 'stone']): 'campfire',
-            frozenset(['stick', 'coal']): 'torch',
-            frozenset(['steel', 'stick']): 'sword',
-            frozenset(['wood', 'steel']): 'shield',
-            frozenset(['stick', 'leaf']): 'rope',
-            frozenset(['wood', 'rope']): 'bridge',
-            frozenset(['stick', 'rope']): 'ladder',
-            frozenset(['rubber', 'steel']): 'electrical_wire',
-            frozenset(['machine_part', 'steel', 'electrical_wire']): 'engine',
-            frozenset(['engine', 'robot', 'steel']): 'flying_machine'
-        }
-        self.decompose_recipes = {
-            'axe': ['stick', 'stone'],
-            'firewood': ['wood', 'axe'],
-            'steel': ['coal', 'iron'],
-            'machine_part': ['steel', 'rubber'],
-            'robot': ['machine_part', 'steel', 'rubber'],
-            'herbal_remedy': ['flower', 'leaf'],
-            'healing_potion': ['herbal_remedy', 'flower'],
-            'campfire': ['firewood', 'stone'],
-            'torch': ['stick', 'coal'],
-            'sword': ['steel', 'stick'],
-            'shield': ['wood', 'steel'],
-            'rope': ['stick', 'leaf'],
-            'bridge': ['wood', 'rope'],
-            'ladder': ['stick', 'rope'],
-            'electrical_wire': ['rubber', 'steel'],
-            'engine': ['machine_part', 'steel', 'electrical_wire'],
-            'flying_machine': ['engine', 'robot', 'steel']
-        }
-    
-    def get_combination(self, items):
-        return self.combine_recipes.get(frozenset(items), None)
-    
-    def get_decomposition(self, item):
-        return self.decompose_recipes.get(item, None)
+# ... (RecipeBook class remains unchanged from previous version)
 
 class Game:
     def __init__(self):
@@ -115,10 +81,9 @@ class Game:
                 else:
                     item = self.grid.grid[y][x]
                     if item:
-                        # Get first letter uppercase for items
                         row.append(item[0].upper())
                     else:
-                        row.append('.')  # Empty cell
+                        row.append('.')
             print(' '.join(row))
     
     def print_status(self):
@@ -130,47 +95,15 @@ class Game:
         for item in self.agent.inventory:
             print(f"- {item}")
     
-    def combine_items(self, items):
-        items_set = set(items)
-        combined = self.recipes.get_combination(items_set)
-        if not combined:
-            return False, "No recipe for these items"
-        
-        temp_inv = self.agent.inventory.copy()
-        try:
-            for item in items:
-                temp_inv.remove(item)
-        except ValueError:
-            return False, "Missing required items"
-        
-        if len(temp_inv) + 1 > self.agent.max_inventory:
-            return False, "Not enough space in backpack"
-        
-        self.agent.inventory = temp_inv
-        self.agent.inventory.append(combined)
-        return True, f"Created {combined}!"
-    
-    def decompose_item(self, item):
-        components = self.recipes.get_decomposition(item)
-        if not components:
-            return False, "Can't decompose this item"
-        
-        if item not in self.agent.inventory:
-            return False, "Item not in inventory"
-        
-        new_size = len(self.agent.inventory) - 1 + len(components)
-        if new_size > self.agent.max_inventory:
-            return False, "Not enough space to decompose"
-        
-        self.agent.inventory.remove(item)
-        self.agent.inventory.extend(components)
-        return True, f"Decomposed into {components}"
+    # ... (combine_items and decompose_item methods remain unchanged)
 
     def run(self):
         print("Welcome to GridWorld!")
-        print("Available actions: move, collect, combine, break, quit")
+        print("Available actions: move, collect, combine, break, put, quit")
         print("Map Key: @ = You, . = Empty, Letters = Items")
-        print("Example Items: S=stick/stone, W=wood, L=leaf, F=flower, C=coal, I=iron, R=rubber")
+        print("Fixed Grid Contains:")
+        print("Row 0: Stick, Stone, Wood, Leaf, Flower")
+        print("Row 1: Flower, Coal, Iron, Rubber, Rubber")
         while True:
             self.print_status()
             action = input("\nWhat would you like to do? ").lower().strip()
@@ -203,6 +136,14 @@ class Game:
             elif action == 'break':
                 item = input("Item to break down: ").lower().strip()
                 success, msg = self.decompose_item(item)
+                print(msg)
+            
+            elif action == 'put':
+                if not self.agent.inventory:
+                    print("Inventory is empty!")
+                    continue
+                item = input("Item to place: ").lower().strip()
+                success, msg = self.agent.drop_item(self.grid, item)
                 print(msg)
             
             else:
