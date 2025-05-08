@@ -41,6 +41,7 @@ class Agent:
         self.y = y
         self.inventory = []
         self.max_inventory = 3
+        self.steps = 0
     
     def move(self, dx, dy, grid):
         new_x = self.x + dx
@@ -108,22 +109,6 @@ class Game:
                 targets.append((x, y, distance))
         return min(targets, key=lambda t: t[2]) if targets else None
 
-    def capture_item(self, item_name):
-        target = self.find_nearby_item(item_name)
-        if not target:
-            return False, f"No {item_name} within 5 cells"
-        target_x, target_y, _ = target
-        self.agent.x, self.agent.y = target_x, target_y
-        success, msg = self.agent.collect_item(self.grid)
-        return (success, msg) if success else (False, f"Capture failed: {msg}")
-
-    def get_capturable_items(self):
-        capturable = set()
-        for item in self.grid.resource_locations:
-            if self.find_nearby_item(item):
-                capturable.add(item)
-        return sorted(capturable)
-
     def print_grid(self):
         print("\nLocal View (5x5 around agent):")
         min_y = max(0, self.agent.y-2)
@@ -146,9 +131,7 @@ class Game:
         print(f"Inventory ({len(self.agent.inventory)}/{self.agent.max_inventory}):")
         for item in self.agent.inventory:
             print(f"- {item}")
-        capturable = self.get_capturable_items()
-        print("\nItems within capture range (5 cells):", 
-              ', '.join(capturable) if capturable else "None")
+        print(f"\nTotal steps taken: {self.agent.steps}")
 
     def combine_items(self, items):
         combined = self.recipes.get_combination(set(items))
@@ -179,7 +162,7 @@ class Game:
 
     def run(self):
         print("Welcome to Crafting World!")
-        print("Available actions: move, collect, combine, break, put, capture, quit")
+        print("Available actions: move, collect, combine, break, put, capture, goto, quit")
         while True:
             self.print_status()
             action = input("\nAction: ").lower().strip()
@@ -187,27 +170,75 @@ class Game:
             if action == 'quit':
                 print("Thanks for playing!")
                 break
+            
             elif action == 'move':
                 dir_map = {'n': (0, -1), 's': (0, 1), 'e': (1, 0), 'w': (-1, 0)}
                 direction = input("Direction (n/s/e/w)? ").lower().strip()
                 if direction in dir_map:
                     dx, dy = dir_map[direction]
-                    print("Moved", direction if self.agent.move(dx, dy, self.grid) else "Can't move there")
-                else: print("Invalid direction")
+                    if self.agent.move(dx, dy, self.grid):
+                        print("Moved", direction)
+                        self.agent.steps += 1
+                    else:
+                        print("Can't move there")
+                else:
+                    print("Invalid direction")
+            
             elif action == 'collect':
-                print(self.agent.collect_item(self.grid)[1])
+                _, msg = self.agent.collect_item(self.grid)
+                print(msg)
+                self.agent.steps += 1
+            
             elif action == 'combine':
                 items = input("Items to combine: ").split()
-                print(self.combine_items(items)[1])
+                _, msg = self.combine_items(items)
+                print(msg)
+                self.agent.steps += 1
+            
             elif action == 'break':
-                print(self.decompose_item(input("Item to decompose: ").strip())[1])
+                _, msg = self.decompose_item(input("Item to decompose: ").strip())
+                print(msg)
+                self.agent.steps += 1
+            
             elif action == 'put':
-                print(self.agent.drop_item(self.grid, input("Item to place: ").strip())[1])
+                _, msg = self.agent.drop_item(self.grid, input("Item to place: ").strip())
+                print(msg)
+                self.agent.steps += 1
+            
+            elif action == 'goto':
+                try:
+                    x = int(input("Enter X coordinate (0-49): "))
+                    y = int(input("Enter Y coordinate (0-49): "))
+                    if 0 <= x < 50 and 0 <= y < 50:
+                        distance = abs(x - self.agent.x) + abs(y - self.agent.y)
+                        self.agent.steps += distance
+                        self.agent.x = x
+                        self.agent.y = y
+                        print(f"Teleported to ({x}, {y})")
+                    else:
+                        print("Coordinates must be between 0-49")
+                except ValueError:
+                    print("Invalid coordinates - must be numbers")
+            
             elif action == 'capture':
+                self.agent.steps += 1  # Capture command attempt
                 if len(self.agent.inventory) >= self.agent.max_inventory:
                     print("Inventory full")
                 else:
-                    print(self.capture_item(input("Item to capture: ").strip())[1])
+                    item = input("Item to capture: ").strip()
+                    target = self.find_nearby_item(item)
+                    if target:
+                        target_x, target_y, _ = target
+                        distance = abs(target_x - self.agent.x) + abs(target_y - self.agent.y)
+                        self.agent.steps += distance
+                        self.agent.x = target_x
+                        self.agent.y = target_y
+                        success, msg = self.agent.collect_item(self.grid)
+                        self.agent.steps += 1  # Collect attempt
+                        print(msg)
+                    else:
+                        print(f"No {item} within 5 cells")
+            
             else:
                 print("Invalid command")
 
