@@ -1,3 +1,5 @@
+import random
+
 class GridWorld:
     def __init__(self, width=50, height=50):
         self.width = width
@@ -7,11 +9,26 @@ class GridWorld:
     
     def populate_grid(self):
         resource_locations = {
-            'Iron': [(10,10), (10,40), (40,10)],
-            'Fuel': [(40,40), (15,15), (35,35)],
-            'Copper': [(25,25), (5,5), (45,45)],
-            'Stone': [(35,15), (5,45), (45,5)],
-            'Wood': [(15,30), (30,30), (20,20)]
+            'Iron': [
+                (5, 5),     # Top-left quadrant
+                (45, 45)    # Bottom-right quadrant
+            ],
+            'Fuel': [
+                (5, 45),    # Bottom-left quadrant
+                (45, 5)     # Top-right quadrant
+            ],
+            'Copper': [
+                (15, 10),   # Left-central area
+                (35, 40)    # Right-central area
+            ],
+            'Stone': [
+                (10, 25),   # Left-center
+                (40, 25)    # Right-center
+            ],
+            'Wood': [
+                (20, 20),   # Upper-middle
+                (30, 30)    # Lower-middle
+            ]
         }
         
         for item, positions in resource_locations.items():
@@ -35,11 +52,19 @@ class GridWorld:
         return False
 
 class Agent:
-    def __init__(self, x=0, y=0):
+    def __init__(self, x=25, y=25):  # Starts at center
         self.x = x
         self.y = y
         self.inventory = []
         self.max_inventory = 3
+    
+    def move(self, dx, dy, grid):
+        new_x = self.x + dx
+        new_y = self.y + dy
+        if 0 <= new_x < grid.width and 0 <= new_y < grid.height:
+            self.x, self.y = new_x, new_y
+            return True
+        return False
     
     def collect_item(self, grid):
         if len(self.inventory) >= self.max_inventory:
@@ -94,7 +119,6 @@ class Game:
         self.recipes = RecipeBook()
     
     def find_nearby_item(self, item_name):
-        """Find closest item within 5-cell Manhattan distance"""
         CAPTURE_RANGE = 5
         targets = []
         
@@ -110,7 +134,6 @@ class Game:
         return min(targets, key=lambda t: t[2])
 
     def capture_item(self, item_name):
-        """Automatically move to and collect nearby item"""
         target = self.find_nearby_item(item_name)
         if not target:
             return False, f"No {item_name} within 5 cells"
@@ -148,7 +171,7 @@ class Game:
         print(f"Inventory ({len(self.agent.inventory)}/{self.agent.max_inventory}):")
         for item in self.agent.inventory:
             print(f"- {item}")
-    
+
     def combine_items(self, items):
         items_set = set(items)
         combined = self.recipes.get_combination(items_set)
@@ -186,10 +209,15 @@ class Game:
         return True, f"Decomposed into {components}"
 
     def run(self):
-        print("Welcome to Automated Crafting World!")
+        print("Welcome to Crafting World!")
         print("Available actions: move, collect, combine, break, put, capture, quit")
-        print("Capture command: Automatically collects nearest item within 5 cells")
-        print("Item positions have multiple copies across the 50x50 grid")
+        print("Agent starts at center (25,25)")
+        print("Item Positions:")
+        print("- Iron: (5,5) and (45,45)")
+        print("- Fuel: (5,45) and (45,5)")
+        print("- Copper: (15,10) and (35,40)")
+        print("- Stone: (10,25) and (40,25)")
+        print("- Wood: (20,20) and (30,30)")
         
         while True:
             self.print_status()
