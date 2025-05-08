@@ -109,6 +109,13 @@ class Game:
                 targets.append((x, y, distance))
         return min(targets, key=lambda t: t[2]) if targets else None
 
+    def get_capturable_items(self):
+        capturable = set()
+        for item in self.grid.resource_locations:
+            if self.find_nearby_item(item):
+                capturable.add(item)
+        return sorted(capturable)
+
     def print_grid(self):
         print("\nLocal View (5x5 around agent):")
         min_y = max(0, self.agent.y-2)
@@ -131,7 +138,9 @@ class Game:
         print(f"Inventory ({len(self.agent.inventory)}/{self.agent.max_inventory}):")
         for item in self.agent.inventory:
             print(f"- {item}")
-        print(f"\nTotal steps taken: {self.agent.steps}")
+        capturable = self.get_capturable_items()
+        print(f"\nItems within capture range (5 cells): {', '.join(capturable) if capturable else 'None'}")
+        print(f"Total steps taken: {self.agent.steps}")
 
     def combine_items(self, items):
         combined = self.recipes.get_combination(set(items))
@@ -221,7 +230,7 @@ class Game:
                     print("Invalid coordinates - must be numbers")
             
             elif action == 'capture':
-                self.agent.steps += 1  # Capture command attempt
+                self.agent.steps += 1  # Capture attempt
                 if len(self.agent.inventory) >= self.agent.max_inventory:
                     print("Inventory full")
                 else:
@@ -234,8 +243,9 @@ class Game:
                         self.agent.x = target_x
                         self.agent.y = target_y
                         success, msg = self.agent.collect_item(self.grid)
-                        self.agent.steps += 1  # Collect attempt
                         print(msg)
+                        if success:
+                            self.agent.steps += 1  # Successful collect
                     else:
                         print(f"No {item} within 5 cells")
             
