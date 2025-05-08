@@ -144,12 +144,12 @@ class CraftingDomain:
 if __name__ == "__main__":
     # Example: Can only hold metal items and basic components
     domain = CraftingDomain(
-       allowed_actions=['build'],
-       allowed_items={'Copper'}
+       #allowed_actions=['build'],
+       #allowed_items={'Copper'}
     )
     
     print("Trying to build Hybrid_Drive with restricted items:")
-    plan = domain.find_plan('Copper')
+    plan = domain.find_plan('Hybrid_Drive')
     
     if plan:
         for step in plan:

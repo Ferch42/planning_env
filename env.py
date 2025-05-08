@@ -175,7 +175,7 @@ class Game:
         self.agent.inventory.extend(components)
         return True, f"Decomposed into {', '.join(components)}"
 
-    def automated_exploration(self, max_steps=100_000):
+    def automated_exploration(self, max_steps=10_000):
         directions = ['n', 's', 'e', 'w']
         print("\nStarting automated exploration...")
         total_resources = sum(len(locs) for locs in self.grid.resource_locations.values())
