@@ -6,36 +6,17 @@ class GridWorld:
         self.populate_grid()
     
     def populate_grid(self):
-        # Clear grid and place items at specific coordinates
-        for y in range(self.height):
-            for x in range(self.width):
-                self.grid[y][x] = None
-                
-        # Hard-coded item positions
-        # Iron (3 copies)
-        self.grid[10][10] = 'Iron'
-        #self.grid[10][40] = 'Iron'
-        self.grid[40][10] = 'Iron'
+        resource_locations = {
+            'Iron': [(10,10), (10,40), (40,10)],
+            'Fuel': [(40,40), (15,15), (35,35)],
+            'Copper': [(25,25), (5,5), (45,45)],
+            'Stone': [(35,15), (5,45), (45,5)],
+            'Wood': [(15,30), (30,30), (20,20)]
+        }
         
-        # Fuel (3 copies)
-        self.grid[40][40] = 'Fuel'
-        self.grid[15][15] = 'Fuel'
-        #self.grid[35][35] = 'Fuel'
-        
-        # Copper (3 copies)
-        #self.grid[25][25] = 'Copper'
-        self.grid[5][5] = 'Copper'
-        self.grid[45][45] = 'Copper'
-        
-        # Stone (3 copies)
-        self.grid[35][15] = 'Stone'
-        self.grid[5][45] = 'Stone'
-        #self.grid[45][5] = 'Stone'
-        
-        # Wood (3 copies)
-        self.grid[15][30] = 'Wood'
-        #self.grid[30][30] = 'Wood'
-        self.grid[20][20] = 'Wood'
+        for item, positions in resource_locations.items():
+            for x, y in positions:
+                self.grid[y][x] = item
 
     def get_cell_items(self, x, y):
         return [self.grid[y][x]] if self.grid[y][x] is not None else []
@@ -59,14 +40,6 @@ class Agent:
         self.y = y
         self.inventory = []
         self.max_inventory = 3
-    
-    def move(self, dx, dy, grid):
-        new_x = self.x + dx
-        new_y = self.y + dy
-        if 0 <= new_x < grid.width and 0 <= new_y < grid.height:
-            self.x, self.y = new_x, new_y
-            return True
-        return False
     
     def collect_item(self, grid):
         if len(self.inventory) >= self.max_inventory:
@@ -120,6 +93,36 @@ class Game:
         self.agent = Agent()
         self.recipes = RecipeBook()
     
+    def find_nearby_item(self, item_name):
+        """Find closest item within 5-cell Manhattan distance"""
+        CAPTURE_RANGE = 5
+        targets = []
+        
+        for y in range(self.grid.height):
+            for x in range(self.grid.width):
+                if self.grid.grid[y][x] == item_name:
+                    distance = abs(x - self.agent.x) + abs(y - self.agent.y)
+                    if distance <= CAPTURE_RANGE:
+                        targets.append((x, y, distance))
+        
+        if not targets:
+            return None
+        return min(targets, key=lambda t: t[2])
+
+    def capture_item(self, item_name):
+        """Automatically move to and collect nearby item"""
+        target = self.find_nearby_item(item_name)
+        if not target:
+            return False, f"No {item_name} within 5 cells"
+        
+        target_x, target_y, _ = target
+        self.agent.x, self.agent.y = target_x, target_y
+        success, msg = self.agent.collect_item(self.grid)
+        
+        if not success:
+            return False, f"Capture failed: {msg}"
+        return True, f"Captured {item_name} at ({target_x}, {target_y})"
+
     def print_grid(self):
         print("\nLocal View (5x5 around agent):")
         min_y = max(0, self.agent.y-2)
@@ -131,13 +134,10 @@ class Game:
             row = []
             for x in range(min_x, max_x):
                 if x == self.agent.x and y == self.agent.y:
-                    row.append('@')  # Agent position
+                    row.append('@')
                 else:
                     item = self.grid.grid[y][x]
-                    if item:
-                        row.append(item[0].upper())
-                    else:
-                        row.append('.')
+                    row.append(item[0].upper() if item else '.')
             print(' '.join(row))
     
     def print_status(self):
@@ -186,13 +186,10 @@ class Game:
         return True, f"Decomposed into {components}"
 
     def run(self):
-        print("Welcome to Crafting World!")
-        print("Available actions: move, collect, combine, break, put, quit")
-        print("Map Key: @ = You, . = Empty, Letters = Items")
-        print("Item Positions:")
-        print("- Iron (10,10)   Fuel (40,40)")
-        print("- Copper (25,25) Stone (35,15)")
-        print("- Wood (15,30)")
+        print("Welcome to Automated Crafting World!")
+        print("Available actions: move, collect, combine, break, put, capture, quit")
+        print("Capture command: Automatically collects nearest item within 5 cells")
+        print("Item positions have multiple copies across the 50x50 grid")
         
         while True:
             self.print_status()
@@ -219,7 +216,7 @@ class Game:
                 print(msg)
             
             elif action == 'combine':
-                items = input("Items to combine (space-separated): ").lower().split()
+                items = input("Items to combine (space-separated): ").split()
                 success, msg = self.combine_items(items)
                 print(msg)
             
@@ -234,6 +231,14 @@ class Game:
                     continue
                 item = input("Item to place: ").strip()
                 success, msg = self.agent.drop_item(self.grid, item)
+                print(msg)
+            
+            elif action == 'capture':
+                if len(self.agent.inventory) >= self.agent.max_inventory:
+                    print("Inventory full - cannot capture")
+                    continue
+                item = input("Item to capture: ").strip()
+                success, msg = self.capture_item(item)
                 print(msg)
             
             else:
