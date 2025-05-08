@@ -1,15 +1,23 @@
 class GridWorld:
-    def __init__(self, width=5, height=5):
+    def __init__(self, width=50, height=50):
         self.width = width
         self.height = height
         self.grid = [[None for _ in range(width)] for _ in range(height)]
         self.populate_grid()
     
     def populate_grid(self):
-        # Precisely placed components for all recipes
-        self.grid[0] = ['stick', 'stone', 'wood', 'leaf', 'flower']
-        self.grid[1] = ['flower', 'coal', 'iron', 'rubber', 'rubber']
-    
+        # Clear grid and place items at specific coordinates
+        for y in range(self.height):
+            for x in range(self.width):
+                self.grid[y][x] = None
+                
+        # Hard-coded item positions
+        self.grid[10][10] = 'Iron'    # (10,10)
+        self.grid[40][40] = 'Fuel'    # (40,40)
+        self.grid[25][25] = 'Copper'  # (25,25)
+        self.grid[35][15] = 'Stone'   # (35,15)
+        self.grid[15][30] = 'Wood'    # (15,30)
+
     def get_cell_items(self, x, y):
         return [self.grid[y][x]] if self.grid[y][x] is not None else []
     
@@ -66,42 +74,19 @@ class Agent:
 class RecipeBook:
     def __init__(self):
         self.combine_recipes = {
-            frozenset(['stick', 'stone']): 'axe',
-            frozenset(['wood', 'axe']): 'firewood',
-            frozenset(['coal', 'iron']): 'steel',
-            frozenset(['steel', 'rubber']): 'machine_part',
-            frozenset(['machine_part', 'steel', 'rubber']): 'robot',
-            frozenset(['flower', 'leaf']): 'herbal_remedy',
-            frozenset(['herbal_remedy', 'flower']): 'healing_potion',
-            frozenset(['firewood', 'stone']): 'campfire',
-            frozenset(['stick', 'coal']): 'torch',
-            frozenset(['steel', 'stick']): 'sword',
-            frozenset(['wood', 'steel']): 'shield',
-            frozenset(['stick', 'leaf']): 'rope',
-            frozenset(['wood', 'rope']): 'bridge',
-            frozenset(['stick', 'rope']): 'ladder',
-            frozenset(['rubber', 'steel']): 'electrical_wire',
-            frozenset(['machine_part', 'steel', 'electrical_wire']): 'engine',
-            frozenset(['engine', 'robot', 'steel']): 'flying_machine'
+            frozenset(['Iron', 'Fuel']): 'Basic_Engine',
+            frozenset(['Copper', 'Stone']): 'Thermal_Core',
+            frozenset(['Basic_Engine', 'Thermal_Core']): 'Hybrid_Drive',
+            frozenset(['Hybrid_Drive', 'Wood']): 'Aerial_Transport',
+            frozenset(['Basic_Engine', 'Wood']): 'Reinforced_Frame'
         }
+        
         self.decompose_recipes = {
-            'axe': ['stick', 'stone'],
-            'firewood': ['wood', 'axe'],
-            'steel': ['coal', 'iron'],
-            'machine_part': ['steel', 'rubber'],
-            'robot': ['machine_part', 'steel', 'rubber'],
-            'herbal_remedy': ['flower', 'leaf'],
-            'healing_potion': ['herbal_remedy', 'flower'],
-            'campfire': ['firewood', 'stone'],
-            'torch': ['stick', 'coal'],
-            'sword': ['steel', 'stick'],
-            'shield': ['wood', 'steel'],
-            'rope': ['stick', 'leaf'],
-            'bridge': ['wood', 'rope'],
-            'ladder': ['stick', 'rope'],
-            'electrical_wire': ['rubber', 'steel'],
-            'engine': ['machine_part', 'steel', 'electrical_wire'],
-            'flying_machine': ['engine', 'robot', 'steel']
+            'Basic_Engine': ['Iron', 'Fuel'],
+            'Thermal_Core': ['Copper', 'Stone'],
+            'Hybrid_Drive': ['Basic_Engine', 'Thermal_Core'],
+            'Aerial_Transport': ['Hybrid_Drive', 'Wood'],
+            'Reinforced_Frame': ['Basic_Engine', 'Wood']
         }
     
     def get_combination(self, items):
@@ -117,10 +102,15 @@ class Game:
         self.recipes = RecipeBook()
     
     def print_grid(self):
-        print("\nGrid World:")
-        for y in range(self.grid.height):
+        print("\nLocal View (5x5 around agent):")
+        min_y = max(0, self.agent.y-2)
+        max_y = min(self.grid.height, self.agent.y+3)
+        min_x = max(0, self.agent.x-2)
+        max_x = min(self.grid.width, self.agent.x+3)
+        
+        for y in range(min_y, max_y):
             row = []
-            for x in range(self.grid.width):
+            for x in range(min_x, max_x):
                 if x == self.agent.x and y == self.agent.y:
                     row.append('@')  # Agent position
                 else:
@@ -177,12 +167,14 @@ class Game:
         return True, f"Decomposed into {components}"
 
     def run(self):
-        print("Welcome to GridWorld!")
+        print("Welcome to Crafting World!")
         print("Available actions: move, collect, combine, break, put, quit")
         print("Map Key: @ = You, . = Empty, Letters = Items")
-        print("Fixed Grid Contains:")
-        print("Row 0: Stick, Stone, Wood, Leaf, Flower")
-        print("Row 1: Flower, Coal, Iron, Rubber, Rubber")
+        print("Item Positions:")
+        print("- Iron (10,10)   Fuel (40,40)")
+        print("- Copper (25,25) Stone (35,15)")
+        print("- Wood (15,30)")
+        
         while True:
             self.print_status()
             action = input("\nWhat would you like to do? ").lower().strip()
@@ -213,7 +205,7 @@ class Game:
                 print(msg)
             
             elif action == 'break':
-                item = input("Item to break down: ").lower().strip()
+                item = input("Item to break down: ").strip()
                 success, msg = self.decompose_item(item)
                 print(msg)
             
@@ -221,7 +213,7 @@ class Game:
                 if not self.agent.inventory:
                     print("Inventory is empty!")
                     continue
-                item = input("Item to place: ").lower().strip()
+                item = input("Item to place: ").strip()
                 success, msg = self.agent.drop_item(self.grid, item)
                 print(msg)
             
