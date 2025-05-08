@@ -12,11 +12,30 @@ class GridWorld:
                 self.grid[y][x] = None
                 
         # Hard-coded item positions
-        self.grid[10][10] = 'Iron'    # (10,10)
-        self.grid[40][40] = 'Fuel'    # (40,40)
-        self.grid[25][25] = 'Copper'  # (25,25)
-        self.grid[35][15] = 'Stone'   # (35,15)
-        self.grid[15][30] = 'Wood'    # (15,30)
+        # Iron (3 copies)
+        self.grid[10][10] = 'Iron'
+        #self.grid[10][40] = 'Iron'
+        self.grid[40][10] = 'Iron'
+        
+        # Fuel (3 copies)
+        self.grid[40][40] = 'Fuel'
+        self.grid[15][15] = 'Fuel'
+        #self.grid[35][35] = 'Fuel'
+        
+        # Copper (3 copies)
+        #self.grid[25][25] = 'Copper'
+        self.grid[5][5] = 'Copper'
+        self.grid[45][45] = 'Copper'
+        
+        # Stone (3 copies)
+        self.grid[35][15] = 'Stone'
+        self.grid[5][45] = 'Stone'
+        #self.grid[45][5] = 'Stone'
+        
+        # Wood (3 copies)
+        self.grid[15][30] = 'Wood'
+        #self.grid[30][30] = 'Wood'
+        self.grid[20][20] = 'Wood'
 
     def get_cell_items(self, x, y):
         return [self.grid[y][x]] if self.grid[y][x] is not None else []
@@ -39,7 +58,7 @@ class Agent:
         self.x = x
         self.y = y
         self.inventory = []
-        self.max_inventory = 5
+        self.max_inventory = 3
     
     def move(self, dx, dy, grid):
         new_x = self.x + dx
