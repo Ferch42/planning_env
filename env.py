@@ -59,14 +59,40 @@ class RecipeBook:
             frozenset(['wood', 'axe']): 'firewood',
             frozenset(['coal', 'iron']): 'steel',
             frozenset(['steel', 'rubber']): 'machine_part',
-            frozenset(['machine_part', 'steel', 'rubber']): 'robot'
+            frozenset(['machine_part', 'steel', 'rubber']): 'robot',
+            # New recipes
+            frozenset(['flower', 'leaf']): 'herbal_remedy',
+            frozenset(['herbal_remedy', 'flower']): 'healing_potion',
+            frozenset(['firewood', 'stone']): 'campfire',
+            frozenset(['stick', 'coal']): 'torch',
+            frozenset(['steel', 'stick']): 'sword',
+            frozenset(['wood', 'steel']): 'shield',
+            frozenset(['stick', 'leaf']): 'rope',
+            frozenset(['wood', 'rope']): 'bridge',
+            frozenset(['stick', 'rope']): 'ladder',
+            frozenset(['rubber', 'steel']): 'electrical_wire',
+            frozenset(['machine_part', 'steel', 'electrical_wire']): 'engine',
+            frozenset(['engine', 'robot', 'steel']): 'flying_machine'
         }
         self.decompose_recipes = {
             'axe': ['stick', 'stone'],
             'firewood': ['wood', 'axe'],
             'steel': ['coal', 'iron'],
             'machine_part': ['steel', 'rubber'],
-            'robot': ['machine_part', 'steel', 'rubber']
+            'robot': ['machine_part', 'steel', 'rubber'],
+            # New decompositions
+            'herbal_remedy': ['flower', 'leaf'],
+            'healing_potion': ['herbal_remedy', 'flower'],
+            'campfire': ['firewood', 'stone'],
+            'torch': ['stick', 'coal'],
+            'sword': ['steel', 'stick'],
+            'shield': ['wood', 'steel'],
+            'rope': ['stick', 'leaf'],
+            'bridge': ['wood', 'rope'],
+            'ladder': ['stick', 'rope'],
+            'electrical_wire': ['rubber', 'steel'],
+            'engine': ['machine_part', 'steel', 'electrical_wire'],
+            'flying_machine': ['engine', 'robot', 'steel']
         }
     
     def get_combination(self, items):
@@ -90,13 +116,11 @@ class Game:
             print(f"- {item}")
     
     def combine_items(self, items):
-        # Convert input list to set for recipe matching
         items_set = set(items)
         combined = self.recipes.get_combination(items_set)
         if not combined:
             return False, "No recipe for these items"
         
-        # Check if all items are present
         temp_inv = self.agent.inventory.copy()
         try:
             for item in items:
@@ -104,17 +128,14 @@ class Game:
         except ValueError:
             return False, "Missing required items"
         
-        # Check space
         if len(temp_inv) + 1 > self.agent.max_inventory:
             return False, "Not enough space in backpack"
         
-        # Perform combination
         self.agent.inventory = temp_inv
         self.agent.inventory.append(combined)
         return True, f"Created {combined}!"
     
     def decompose_item(self, item):
-        # Check decomposition recipe
         components = self.recipes.get_decomposition(item)
         if not components:
             return False, "Can't decompose this item"
@@ -122,12 +143,10 @@ class Game:
         if item not in self.agent.inventory:
             return False, "Item not in inventory"
         
-        # Check space
         new_size = len(self.agent.inventory) - 1 + len(components)
         if new_size > self.agent.max_inventory:
             return False, "Not enough space to decompose"
         
-        # Perform decomposition
         self.agent.inventory.remove(item)
         self.agent.inventory.extend(components)
         return True, f"Decomposed into {components}"
@@ -135,6 +154,11 @@ class Game:
     def run(self):
         print("Welcome to GridWorld!")
         print("Available actions: move, collect, combine, break, quit")
+        print("Some example recipes:")
+        print("- stick + stone = axe")
+        print("- flower + leaf = herbal_remedy")
+        print("- steel + stick = sword")
+        print("- robot + engine + steel = flying_machine")
         while True:
             self.print_status()
             action = input("\nWhat would you like to do? ").lower().strip()
