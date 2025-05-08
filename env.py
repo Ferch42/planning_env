@@ -60,7 +60,6 @@ class RecipeBook:
             frozenset(['coal', 'iron']): 'steel',
             frozenset(['steel', 'rubber']): 'machine_part',
             frozenset(['machine_part', 'steel', 'rubber']): 'robot',
-            # New recipes
             frozenset(['flower', 'leaf']): 'herbal_remedy',
             frozenset(['herbal_remedy', 'flower']): 'healing_potion',
             frozenset(['firewood', 'stone']): 'campfire',
@@ -80,7 +79,6 @@ class RecipeBook:
             'steel': ['coal', 'iron'],
             'machine_part': ['steel', 'rubber'],
             'robot': ['machine_part', 'steel', 'rubber'],
-            # New decompositions
             'herbal_remedy': ['flower', 'leaf'],
             'healing_potion': ['herbal_remedy', 'flower'],
             'campfire': ['firewood', 'stone'],
@@ -107,7 +105,24 @@ class Game:
         self.agent = Agent()
         self.recipes = RecipeBook()
     
+    def print_grid(self):
+        print("\nGrid World:")
+        for y in range(self.grid.height):
+            row = []
+            for x in range(self.grid.width):
+                if x == self.agent.x and y == self.agent.y:
+                    row.append('@')  # Agent position
+                else:
+                    item = self.grid.grid[y][x]
+                    if item:
+                        # Get first letter uppercase for items
+                        row.append(item[0].upper())
+                    else:
+                        row.append('.')  # Empty cell
+            print(' '.join(row))
+    
     def print_status(self):
+        self.print_grid()
         print(f"\nPosition: ({self.agent.x}, {self.agent.y})")
         cell_items = self.grid.get_cell_items(self.agent.x, self.agent.y)
         print(f"Current cell item: {cell_items[0] if cell_items else 'Empty'}")
@@ -154,11 +169,8 @@ class Game:
     def run(self):
         print("Welcome to GridWorld!")
         print("Available actions: move, collect, combine, break, quit")
-        print("Some example recipes:")
-        print("- stick + stone = axe")
-        print("- flower + leaf = herbal_remedy")
-        print("- steel + stick = sword")
-        print("- robot + engine + steel = flying_machine")
+        print("Map Key: @ = You, . = Empty, Letters = Items")
+        print("Example Items: S=stick/stone, W=wood, L=leaf, F=flower, C=coal, I=iron, R=rubber")
         while True:
             self.print_status()
             action = input("\nWhat would you like to do? ").lower().strip()
