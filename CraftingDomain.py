@@ -22,7 +22,10 @@ class CraftingDomain:
             'Thermal_Core': frozenset({'Copper', 'Stone'}),
             'Hybrid_Drive': frozenset({'Basic_Engine', 'Thermal_Core'}),
             'Aerial_Transport': frozenset({'Hybrid_Drive', 'Wood'}),
-            'Reinforced_Frame': frozenset({'Basic_Engine', 'Wood'})
+            'Reinforced_Frame': frozenset({'Basic_Engine', 'Wood'}),
+            'Steam_Generator': frozenset({'Iron', 'Fuel', 'Stone'}),
+            'Steam_Cart': frozenset({'Steam_Generator', 'Wood'}),
+            'Copper_Furnace': frozenset({'Fuel', 'Copper', 'Wood'})
         }
         self.DECOMPOSITIONS = {v: k for k, v in self.RECIPES.items()}
         

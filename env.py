@@ -1,5 +1,6 @@
 import random
 from collections import defaultdict
+from CraftingDomain import CraftingDomain
 
 class GridWorld:
     def __init__(self, width=50, height=50):
@@ -80,19 +81,33 @@ class Agent:
 class RecipeBook:
     def __init__(self):
         self.combine_recipes = {
+            # Original recipes
             frozenset(['Iron', 'Fuel']): 'Basic_Engine',
             frozenset(['Copper', 'Stone']): 'Thermal_Core',
             frozenset(['Basic_Engine', 'Thermal_Core']): 'Hybrid_Drive',
             frozenset(['Hybrid_Drive', 'Wood']): 'Aerial_Transport',
-            frozenset(['Basic_Engine', 'Wood']): 'Reinforced_Frame'
+            frozenset(['Basic_Engine', 'Wood']): 'Reinforced_Frame',
+            
+            # New recipes
+            frozenset(['Iron', 'Fuel', 'Stone']): 'Steam_Generator',
+            frozenset(['Steam_Generator', 'Wood']): 'Steam_Cart',
+            frozenset(['Fuel', 'Copper', 'Wood']): 'Copper_Furnace'
         }
+        
         self.decompose_recipes = {
+            # Original decompositions
             'Basic_Engine': ['Iron', 'Fuel'],
             'Thermal_Core': ['Copper', 'Stone'],
             'Hybrid_Drive': ['Basic_Engine', 'Thermal_Core'],
             'Aerial_Transport': ['Hybrid_Drive', 'Wood'],
-            'Reinforced_Frame': ['Basic_Engine', 'Wood']
+            'Reinforced_Frame': ['Basic_Engine', 'Wood'],
+            
+            # New decompositions
+            'Steam_Generator': ['Iron', 'Fuel', 'Stone'],
+            'Steam_Cart': ['Steam_Generator', 'Wood'],
+            'Copper_Furnace': ['Fuel', 'Copper', 'Wood']
         }
+
     
     def get_combination(self, items):
         return self.combine_recipes.get(frozenset(items), None)
