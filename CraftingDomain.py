@@ -152,7 +152,7 @@ if __name__ == "__main__":
     )
     
     print("Trying to build Hybrid_Drive with restricted items:")
-    plan = domain.find_plan('Hybrid_Drive')
+    plan = domain.find_plan('Steam_Cart')
     
     if plan:
         for step in plan:
