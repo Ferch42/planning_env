@@ -60,7 +60,7 @@ class CraftingDomain:
 
     def decompose(self, state: State, item: str) -> Optional[State]:
         components = self.RECIPES.get(item)
-        if components and item in state.holding:
+        if components and item in state.holding and (len(state.holding) - 1 + len(components) <= self.MAX_CAPACITY):
             new_holding = set(state.holding)
             new_holding.remove(item)
             new_holding.update(components)
