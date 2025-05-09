@@ -24,7 +24,7 @@ class CraftingDomain:
             'Steam_Cart': frozenset({'Steam_Generator', 'Wood'}),
             'Copper_Furnace': frozenset({'Fuel', 'Copper', 'Wood'})
         }
-        self.DECOMPOSITIONS = self.RECIPES
+
         self.CRAFTED_ITEMS = set(self.RECIPES.keys())
         self.MAX_CAPACITY = 3
         self.allowed_actions = set(allowed_actions)
