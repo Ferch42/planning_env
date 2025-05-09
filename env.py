@@ -10,6 +10,7 @@ class State:
 
 class CraftingDomain:
     VALID_ACTIONS = {'hold', 'drop', 'build', 'decompose'}
+    BASIC_ITEMS = {'Iron', 'Fuel', 'Copper', 'Stone', 'Wood'}
     
     def __init__(self, allowed_actions: Collection[str] = VALID_ACTIONS,
                  allowed_items: Collection[str] = None):
@@ -24,7 +25,6 @@ class CraftingDomain:
             'Copper_Furnace': frozenset({'Fuel', 'Copper', 'Wood'})
         }
         self.DECOMPOSITIONS = self.RECIPES
-        self.BASIC_ITEMS = {'Iron', 'Fuel', 'Copper', 'Stone', 'Wood'}
         self.CRAFTED_ITEMS = set(self.RECIPES.keys())
         self.MAX_CAPACITY = 3
         self.allowed_actions = set(allowed_actions)
@@ -107,35 +107,48 @@ class CraftingDomain:
         return []
 
 class GridWorld:
+    BASIC_ITEMS = {'Iron', 'Fuel', 'Copper', 'Stone', 'Wood'}
+    
     def __init__(self, width=50, height=50):
         self.width = width
         self.height = height
         self.grid = [[None for _ in range(width)] for _ in range(height)]
-        self.initial_resources = {
-            'Iron': [(5, 5), (45, 45)],
-            'Fuel': [(5, 45), (45, 5)],
-            'Copper': [(15, 10), (35, 40)],
-            'Stone': [(10, 25), (40, 25)],
-            'Wood': [(20, 20), (30, 30)]
-        }
         self.item_locations = defaultdict(set)
         self.reset_world()
 
     def reset_world(self):
+        # Clear existing items
         for y in range(self.height):
             for x in range(self.width):
                 self.grid[y][x] = None
         self.item_locations.clear()
-        for item, positions in self.initial_resources.items():
-            for x, y in positions:
-                self.grid[y][x] = item
-                self.item_locations[item].add((x, y))
+
+        # Place 2 of each basic item at random positions
+        for item in self.BASIC_ITEMS:
+            placed = 0
+            while placed < 2:
+                x = random.randint(0, self.width-1)
+                y = random.randint(0, self.height-1)
+                if self.grid[y][x] is None:
+                    self.grid[y][x] = item
+                    self.item_locations[item].add((x, y))
+                    placed += 1
 
     def remove_item(self, x: int, y: int) -> Optional[str]:
         item = self.grid[y][x]
         if item:
             self.grid[y][x] = None
             self.item_locations[item].discard((x, y))
+            
+            # Respawn basic items to maintain count
+            if item in self.BASIC_ITEMS:
+                # Find empty cells
+                empty_cells = [(x, y) for y in range(self.height) 
+                             for x in range(self.width) if self.grid[y][x] is None]
+                if empty_cells:
+                    new_x, new_y = random.choice(empty_cells)
+                    self.place_item(new_x, new_y, item)
+                    
         return item
 
     def place_item(self, x: int, y: int, item: str) -> bool:
@@ -196,7 +209,7 @@ class Game:
                 self.print_status(steps)
             
             self.update_discoveries()
-            known_basics = {item for item in self.grid.initial_resources 
+            known_basics = {item for item in self.grid.BASIC_ITEMS 
                            if self.agent.discovered_resources[item]}
             
             plan = self.crafting_domain.find_plan(target, known_basics)
