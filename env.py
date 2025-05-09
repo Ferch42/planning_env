@@ -1,39 +1,45 @@
 import random
-from collections import defaultdict
-from CraftingDomain import CraftingDomain
+from collections import defaultdict, deque
+from typing import List, Dict, Set, Tuple, Optional
 
 class GridWorld:
     def __init__(self, width=50, height=50):
         self.width = width
         self.height = height
         self.grid = [[None for _ in range(width)] for _ in range(height)]
-        self.resource_locations = {
+        self.initial_resources = {
             'Iron': [(5, 5), (45, 45)],
             'Fuel': [(5, 45), (45, 5)],
             'Copper': [(15, 10), (35, 40)],
             'Stone': [(10, 25), (40, 25)],
             'Wood': [(20, 20), (30, 30)]
         }
-        self.populate_grid()
+        self.item_locations = defaultdict(set)
+        self.reset_world()
     
-    def populate_grid(self):
-        for item, positions in self.resource_locations.items():
+    def reset_world(self):
+        self.grid = [[None for _ in range(self.width)] for _ in range(self.height)]
+        self.item_locations.clear()
+        for item, positions in self.initial_resources.items():
             for x, y in positions:
                 self.grid[y][x] = item
-
-    def get_cell_items(self, x, y):
-        return [self.grid[y][x]] if self.grid[y][x] is not None else []
+                self.item_locations[item].add((x, y))
     
-    def remove_item(self, x, y):
-        if self.grid[y][x] is not None:
-            removed_item = self.grid[y][x]
+    def get_cell_items(self, x: int, y: int) -> List[str]:
+        return [self.grid[y][x]] if self.grid[y][x] else []
+    
+    def remove_item(self, x: int, y: int) -> Optional[str]:
+        if self.grid[y][x]:
+            item = self.grid[y][x]
             self.grid[y][x] = None
-            return removed_item
+            self.item_locations[item].discard((x, y))
+            return item
         return None
     
-    def place_item(self, x, y, item):
+    def place_item(self, x: int, y: int, item: str) -> bool:
         if self.grid[y][x] is None:
             self.grid[y][x] = item
+            self.item_locations[item].add((x, y))
             return True
         return False
 
@@ -47,283 +53,249 @@ class Agent:
         self.discovered_resources = defaultdict(set)
         self.visited_cells = set()
     
-    def move(self, dx, dy, grid):
+    def move(self, dx: int, dy: int, grid: GridWorld) -> bool:
         new_x = self.x + dx
         new_y = self.y + dy
         if 0 <= new_x < grid.width and 0 <= new_y < grid.height:
             self.x, self.y = new_x, new_y
+            self.visited_cells.add((new_x, new_y))
             return True
         return False
     
-    def collect_item(self, grid):
+    def collect_item(self, grid: GridWorld) -> Tuple[bool, str]:
         if len(self.inventory) >= self.max_inventory:
             return False, "Backpack full!"
-        items = grid.get_cell_items(self.x, self.y)
-        if not items:
-            return False, "No items here!"
+        
         item = grid.remove_item(self.x, self.y)
         if item:
+            if (self.x, self.y) in self.discovered_resources[item]:
+                if not grid.get_cell_items(self.x, self.y):
+                    self.discovered_resources[item].discard((self.x, self.y))
             self.inventory.append(item)
             return True, f"Collected {item}"
-        return False, "Collection failed"
+        return False, "No items here!"
     
-    def drop_item(self, grid, item):
+    def drop_item(self, grid: GridWorld, item: str) -> Tuple[bool, str]:
         if item not in self.inventory:
             return False, "Item not in inventory"
-        if not grid.place_item(self.x, self.y, item):
-            return False, "Cell is not empty"
-        self.inventory.remove(item)
-        return True, f"Placed {item} at ({self.x}, {self.y})"
+        if grid.place_item(self.x, self.y, item):
+            self.record_discovery(item, self.x, self.y)
+            self.inventory.remove(item)
+            return True, f"Placed {item}"
+        return False, "Cell occupied"
     
-    def record_discovery(self, item, x, y):
+    def record_discovery(self, item: str, x: int, y: int):
         self.discovered_resources[item].add((x, y))
 
 class RecipeBook:
     def __init__(self):
         self.combine_recipes = {
-            # Original recipes
             frozenset(['Iron', 'Fuel']): 'Basic_Engine',
             frozenset(['Copper', 'Stone']): 'Thermal_Core',
             frozenset(['Basic_Engine', 'Thermal_Core']): 'Hybrid_Drive',
             frozenset(['Hybrid_Drive', 'Wood']): 'Aerial_Transport',
             frozenset(['Basic_Engine', 'Wood']): 'Reinforced_Frame',
-            
-            # New recipes
             frozenset(['Iron', 'Fuel', 'Stone']): 'Steam_Generator',
             frozenset(['Steam_Generator', 'Wood']): 'Steam_Cart',
             frozenset(['Fuel', 'Copper', 'Wood']): 'Copper_Furnace'
         }
-        
-        self.decompose_recipes = {
-            # Original decompositions
-            'Basic_Engine': ['Iron', 'Fuel'],
-            'Thermal_Core': ['Copper', 'Stone'],
-            'Hybrid_Drive': ['Basic_Engine', 'Thermal_Core'],
-            'Aerial_Transport': ['Hybrid_Drive', 'Wood'],
-            'Reinforced_Frame': ['Basic_Engine', 'Wood'],
-            
-            # New decompositions
-            'Steam_Generator': ['Iron', 'Fuel', 'Stone'],
-            'Steam_Cart': ['Steam_Generator', 'Wood'],
-            'Copper_Furnace': ['Fuel', 'Copper', 'Wood']
-        }
-
+        self.decompose_recipes = {v: list(k) for k, v in self.combine_recipes.items()}
     
-    def get_combination(self, items):
+    def get_combination(self, items: Set[str]) -> Optional[str]:
         return self.combine_recipes.get(frozenset(items), None)
     
-    def get_decomposition(self, item):
-        return self.decompose_recipes.get(item, None)
+    def get_decomposition(self, item: str) -> Optional[List[str]]:
+        return self.decompose_recipes.get(item)
+
+class CraftingDomain:
+    def __init__(self, allowed_basics: Set[str], recipe_book: RecipeBook):
+        self.recipes = recipe_book
+        self.allowed_items = allowed_basics | set(recipe_book.combine_recipes.values())
+        self.MAX_CAPACITY = 3
+
+    def find_plan(self, target: str) -> List[str]:
+        initial_state = (frozenset(), frozenset(self.allowed_items))
+        queue = deque([(initial_state, [])])
+        visited = set()
+
+        while queue:
+            (holding, available), path = queue.popleft()
+            
+            if target in holding:
+                return path
+            
+            state_key = (holding, available)
+            if state_key in visited:
+                continue
+            visited.add(state_key)
+            
+            if len(holding) >= self.MAX_CAPACITY:
+                for item in holding:
+                    new_holding = set(holding)
+                    new_holding.remove(item)
+                    new_available = set(available)
+                    new_available.add(item)
+                    new_path = path + [f"drop {item}"]
+                    queue.append(((frozenset(new_holding), frozenset(new_available)), new_path))
+            
+            for item in available:
+                if item in self.allowed_items and (len(holding) < self.MAX_CAPACITY or len(holding) >= self.MAX_CAPACITY):
+                    new_holding = set(holding)
+                    new_holding.add(item)
+                    new_available = set(available)
+                    new_available.discard(item)
+                    if len(new_holding) <= self.MAX_CAPACITY:
+                        new_path = path + [f"hold {item}"]
+                        queue.append(((frozenset(new_holding), frozenset(new_available)), new_path))
+            
+            for recipe, result in self.recipes.combine_recipes.items():
+                if set(recipe).issubset(holding) and result in self.allowed_items:
+                    new_holding = set(holding) - set(recipe)
+                    new_holding.add(result)
+                    new_available = set(available)
+                    new_available.add(result)
+                    new_path = path + [f"build {result}"]
+                    queue.append(((frozenset(new_holding), frozenset(new_available)), new_path))
+        
+        return []
 
 class Game:
     def __init__(self):
         self.grid = GridWorld()
         self.agent = Agent()
-        self.recipes = RecipeBook()
+        self.recipe_book = RecipeBook()
+        self.current_plan = []
     
-    def find_nearby_item(self, item_name):
-        CAPTURE_RANGE = 5
-        targets = []
-        for x, y in self.grid.resource_locations.get(item_name, []):
-            distance = abs(x - self.agent.x) + abs(y - self.agent.y)
-            if distance <= CAPTURE_RANGE:
-                targets.append((x, y, distance))
-        return min(targets, key=lambda t: t[2]) if targets else None
-
-    def get_capturable_items(self):
-        capturable = set()
-        for item in self.grid.resource_locations:
-            if self.find_nearby_item(item):
-                capturable.add(item)
-        return sorted(capturable)
-
-    def print_grid(self):
-        print("\nLocal View (5x5 around agent):")
-        min_y = max(0, self.agent.y-2)
-        max_y = min(self.grid.height, self.agent.y+3)
-        min_x = max(0, self.agent.x-2)
-        max_x = min(self.grid.width, self.agent.x+3)
-        for y in range(min_y, max_y):
-            row = []
-            for x in range(min_x, max_x):
-                if x == self.agent.x and y == self.agent.y:
-                    row.append('@')
+    def automated_crafting_mission(self, target_item: str, max_steps=10000):
+        print(f"\n🚀 Starting mission to craft {target_item}!")
+        steps = 0
+        
+        while steps < max_steps and target_item not in self.agent.inventory:
+            if steps % 100 == 0 and steps > 0:
+                print(f"\n⏱ Step {steps} Report:")
+                print(f"📍 Position: ({self.agent.x}, {self.agent.y})")
+                print(f"🎒 Inventory ({len(self.agent.inventory)}/{self.agent.max_inventory}): {self.agent.inventory}")
+                print("🔍 Discovered Resources:")
+                for item in self.grid.initial_resources.keys():
+                    count = len(self.agent.discovered_resources[item])
+                    print(f"  - {item}: {count} locations")
+                if self.current_plan:
+                    print(f"📋 Current Plan: {self.current_plan[:3]}... ({len(self.current_plan)} steps remaining)")
                 else:
-                    item = self.grid.grid[y][x]
-                    row.append(item[0].upper() if item else '.')
-            print(' '.join(row))
-    
-    def print_status(self):
-        self.print_grid()
-        print(f"\nPosition: ({self.agent.x}, {self.agent.y})")
-        print(f"Inventory ({len(self.agent.inventory)}/{self.agent.max_inventory}):")
-        for item in self.agent.inventory:
-            print(f"- {item}")
-        capturable = self.get_capturable_items()
-        print(f"\nItems within capture range (5 cells): {', '.join(capturable) if capturable else 'None'}")
-        print(f"Total steps taken: {self.agent.steps}")
+                    print("📋 Current Plan: Exploring for resources")
+                print("--------------------------------------------------")
+            
+            known_basics = {item for item in self.agent.discovered_resources 
+                           if item in self.grid.initial_resources}
+            
+            domain = CraftingDomain(known_basics, self.recipe_book)
+            
+            if not self.current_plan:
+                self.current_plan = domain.find_plan(target_item)
+                if not self.current_plan:
+                    self.explore_step()
+                    steps += 1
+                    continue
+            
+            try:
+                self.execute_plan_step()
+            except Exception as e:
+                self.current_plan = []
+            steps += 1  # Critical fix: Always increment steps
+        
+        if target_item in self.agent.inventory:
+            print(f"\n🎉 Successfully crafted {target_item} in {steps} steps!")
+            print(f"📍 Final position: ({self.agent.x}, {self.agent.y})")
+            print(f"🎒 Final inventory: {self.agent.inventory}")
+        else:
+            print("\n🔥 Mission failed: Timeout reached")
 
-    def combine_items(self, items):
-        combined = self.recipes.get_combination(set(items))
-        if not combined:
-            return False, "No recipe for these items"
+    def explore_step(self):
+        direction = random.choice(['n','s','e','w'])
+        dx, dy = {'n':(0,-1),'s':(0,1),'e':(1,0),'w':(-1,0)}[direction]
+        if self.agent.move(dx, dy, self.grid):
+            self.agent.steps += 1
+            self.update_discoveries()
+
+    def update_discoveries(self):
+        for item in self.grid.item_locations:
+            for x, y in self.grid.item_locations[item]:
+                if abs(x-self.agent.x) <=5 and abs(y-self.agent.y) <=5:
+                    self.agent.record_discovery(item, x, y)
+
+    def execute_plan_step(self):
+        if not self.current_plan:
+            return
+        
+        action = self.current_plan.pop(0)
+        
+        if action.startswith("hold"):
+            self.handle_hold_action(action)
+        elif action.startswith("build"):
+            self.handle_build_action(action)
+        elif action.startswith("drop"):
+            self.handle_drop_action(action)
+
+    def handle_hold_action(self, action: str):
+        item = action.split()[1]
+        if len(self.agent.inventory) >= self.agent.max_inventory:
+            raise Exception("Inventory full")
+        self.collect_item(item)
+
+    def handle_drop_action(self, action: str):
+        item = action.split()[1]
+        if item not in self.agent.inventory:
+            raise Exception("Item not in inventory")
+        success, _ = self.agent.drop_item(self.grid, item)
+        if not success:
+            raise Exception("Failed to drop item")
+
+    def handle_build_action(self, action: str):
+        target = action.split()[1]
+        components = self.recipe_book.get_decomposition(target)
+        
+        if len(self.agent.inventory) + len(components) - 1 > self.agent.max_inventory:
+            self.drop_non_essential(components)
+        
+        self.craft_item(target)
+
+    def collect_item(self, item: str):
+        if item not in self.agent.discovered_resources:
+            raise Exception("Unknown resource location")
+        
+        closest = min(self.agent.discovered_resources[item],
+                     key=lambda p: abs(p[0]-self.agent.x)+abs(p[1]-self.agent.y))
+        self.agent.x, self.agent.y = closest
+        success, _ = self.agent.collect_item(self.grid)
+        if not success:
+            raise Exception("Collection failed")
+
+    def craft_item(self, target: str):
+        components = self.recipe_book.get_decomposition(target)
+        if not components:
+            raise Exception("Unknown recipe")
+        
+        missing = [c for c in components if c not in self.agent.inventory]
+        if missing:
+            raise Exception("Missing components")
+        
         temp_inv = self.agent.inventory.copy()
         try:
-            for item in items:
-                temp_inv.remove(item)
+            for c in components:
+                temp_inv.remove(c)
         except ValueError:
-            return False, "Missing items"
-        if len(temp_inv) + 1 > self.agent.max_inventory:
-            return False, "Inventory full"
-        self.agent.inventory = temp_inv + [combined]
-        return True, f"Created {combined}!"
-
-    def decompose_item(self, item):
-        components = self.recipes.get_decomposition(item)
-        if not components:
-            return False, "Can't decompose"
-        if item not in self.agent.inventory:
-            return False, "Not in inventory"
-        if len(self.agent.inventory) + len(components) - 1 > self.agent.max_inventory:
-            return False, "Not enough space"
-        self.agent.inventory.remove(item)
-        self.agent.inventory.extend(components)
-        return True, f"Decomposed into {', '.join(components)}"
-
-    def automated_exploration(self, max_steps=10_000):
-        directions = ['n', 's', 'e', 'w']
-        print("\nStarting automated exploration...")
-        total_resources = sum(len(locs) for locs in self.grid.resource_locations.values())
+            raise Exception("Components mismatch")
         
-        for _ in range(max_steps):
-            direction = random.choice(directions)
-            dx, dy = {'n': (0, -1), 's': (0, 1), 
-                      'e': (1, 0), 'w': (-1, 0)}[direction]
-            
-            if self.agent.move(dx, dy, self.grid):
-                self.agent.steps += 1
-                current_pos = (self.agent.x, self.agent.y)
-                self.agent.visited_cells.add(current_pos)
-                
-                for item, locations in self.grid.resource_locations.items():
-                    for (x, y) in locations:
-                        distance = abs(x - self.agent.x) + abs(y - self.agent.y)
-                        if distance <= 5:
-                            self.agent.record_discovery(item, x, y)
-                
-                if self.agent.steps % 50 == 0:
-                    self.print_exploration_progress()
-                    
-                discovered = sum(len(v) for v in self.agent.discovered_resources.values())
-                if discovered >= total_resources:
-                    print("\nAll resources discovered!")
-                    break
-        else:
-            print("\nReached maximum exploration steps!")
-        
-        self.print_exploration_summary()
+        self.agent.inventory = temp_inv + [target]
 
-    def print_exploration_progress(self):
-        print(f"\nStep {self.agent.steps}:")
-        print(f"Visited cells: {len(self.agent.visited_cells)}")
-        print("Discovered resources:")
-        for resource, locations in self.agent.discovered_resources.items():
-            print(f"- {resource}: {len(locations)} locations")
-
-    def print_exploration_summary(self):
-        print("\n=== Exploration Summary ===")
-        print(f"Total steps taken: {self.agent.steps}")
-        print(f"Unique cells visited: {len(self.agent.visited_cells)}")
-        print(f"Percentage of grid explored: {len(self.agent.visited_cells)/2500:.1%}")
-        print("\nDiscovered resource locations:")
-        for resource, locations in self.agent.discovered_resources.items():
-            print(f"\n{resource}:")
-            for x, y in sorted(locations):
-                print(f"({x:>2}, {y:>2})", end=' ')
-        print("\n")
-
-    def run(self):
-        print("Welcome to Crafting World!")
-        print("Choose mode: [1] Manual [2] Automated")
-        choice = input("Mode: ").strip()
-        
-        if choice == '1':
-            print("Available actions: move, collect, combine, break, put, capture, goto, quit")
-            while True:
-                self.print_status()
-                action = input("\nAction: ").lower().strip()
-                
-                if action == 'quit':
-                    print("Thanks for playing!")
-                    break
-                elif action == 'move':
-                    dir_map = {'n': (0, -1), 's': (0, 1), 'e': (1, 0), 'w': (-1, 0)}
-                    direction = input("Direction (n/s/e/w)? ").lower().strip()
-                    if direction in dir_map:
-                        dx, dy = dir_map[direction]
-                        if self.agent.move(dx, dy, self.grid):
-                            print("Moved", direction)
-                            self.agent.steps += 1
-                        else:
-                            print("Can't move there")
-                    else:
-                        print("Invalid direction")
-                elif action == 'collect':
-                    _, msg = self.agent.collect_item(self.grid)
-                    print(msg)
-                    self.agent.steps += 1
-                elif action == 'combine':
-                    items = input("Items to combine: ").split()
-                    _, msg = self.combine_items(items)
-                    print(msg)
-                    self.agent.steps += 1
-                elif action == 'break':
-                    _, msg = self.decompose_item(input("Item to decompose: ").strip())
-                    print(msg)
-                    self.agent.steps += 1
-                elif action == 'put':
-                    _, msg = self.agent.drop_item(self.grid, input("Item to place: ").strip())
-                    print(msg)
-                    self.agent.steps += 1
-                elif action == 'goto':
-                    try:
-                        x = int(input("Enter X coordinate (0-49): "))
-                        y = int(input("Enter Y coordinate (0-49): "))
-                        if 0 <= x < 50 and 0 <= y < 50:
-                            distance = abs(x - self.agent.x) + abs(y - self.agent.y)
-                            self.agent.steps += distance
-                            self.agent.x = x
-                            self.agent.y = y
-                            print(f"Teleported to ({x}, {y})")
-                        else:
-                            print("Coordinates must be between 0-49")
-                    except ValueError:
-                        print("Invalid coordinates - must be numbers")
-                elif action == 'capture':
-                    self.agent.steps += 1
-                    if len(self.agent.inventory) >= self.agent.max_inventory:
-                        print("Inventory full")
-                    else:
-                        item = input("Item to capture: ").strip()
-                        target = self.find_nearby_item(item)
-                        if target:
-                            target_x, target_y, _ = target
-                            distance = abs(target_x - self.agent.x) + abs(target_y - self.agent.y)
-                            self.agent.steps += distance
-                            self.agent.x = target_x
-                            self.agent.y = target_y
-                            success, msg = self.agent.collect_item(self.grid)
-                            print(msg)
-                            if success:
-                                self.agent.steps += 1
-                        else:
-                            print(f"No {item} within 5 cells")
-                else:
-                    print("Invalid command")
-        elif choice == '2':
-            self.automated_exploration()
-        else:
-            print("Invalid choice")
+    def drop_non_essential(self, needed_components: List[str]):
+        for item in self.agent.inventory.copy():
+            if item not in needed_components:
+                success, _ = self.agent.drop_item(self.grid, item)
+                if success:
+                    return
+        raise Exception("No items to drop")
 
 if __name__ == "__main__":
-    Game().run()
+    game = Game()
+    game.automated_crafting_mission("Hybrid_Drive")
