@@ -68,9 +68,9 @@ class CraftingDomain:
             return State(frozenset(new_holding), state.available)
         return None
 
-    def find_plan(self, goal: str, available_basics: Set[str]) -> List[str]:
+    def find_plan(self, goal: str, available_basics: Set[str], inventory: Set[str]) -> List[str]:
         initial_available = (self.BASIC_ITEMS & available_basics) | set()
-        initial_state = State(frozenset(), frozenset(initial_available))
+        initial_state = State(frozenset(inventory), frozenset(initial_available))
         queue = deque([(initial_state, [])])
         visited = set()
 
@@ -215,7 +215,7 @@ class Agent:
                 # Edge case: agent is at grid boundary and all moves are invalid
                 # This should be extremely rare given grid size, but continue trying
                 continue
-            
+
         return False
 
 class Game:
@@ -236,7 +236,7 @@ class Game:
             known_basics = {item for item in self.grid.BASIC_ITEMS 
                            if self.agent.discovered_resources[item]}
             
-            plan = self.crafting_domain.find_plan(target, known_basics)
+            plan = self.crafting_domain.find_plan(target, known_basics, set(self.agent.inventory))
             
             if not plan:
                 self.random_exploration()
@@ -255,6 +255,8 @@ class Game:
                 self.update_discoveries()
 
         self.mission_result(target, steps)
+        print(self.grid.item_locations)
+        
 
     def execute_action(self, action: str):
         cmd, *rest = action.split()
