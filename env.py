@@ -217,6 +217,13 @@ class Agent:
                 continue
 
         return False
+    
+    def destroy(self, item: str) -> Tuple[bool, str]:
+        """Destroy an item from inventory without placing it in the world"""
+        if item not in self.inventory:
+            return False, "Item not in inventory"
+        self.inventory.remove(item)
+        return True, f"Destroyed {item}"
 
 class Game:
     def __init__(self):
@@ -224,14 +231,19 @@ class Game:
         self.agent = Agent()
         self.crafting_domain = CraftingDomain()
 
-    def automated_crafting_mission(self, target: str, max_steps=10000):
+    def automated_crafting_mission(self, target: str, max_steps=100000):
         print(f"\n🚀 Starting mission to craft {target}!")
         steps = 0
         
-        while steps < max_steps and target not in self.agent.inventory:
-            if steps % 100 == 0:
+        while steps < max_steps:
+            if steps % 10000 == 0:
                 self.print_status(steps)
             
+            if target in self.agent.inventory:
+
+                self.agent.destroy(target)
+                print(f'Sucessfully built {target} in {steps}')
+
             self.update_discoveries()
             known_basics = {item for item in self.grid.BASIC_ITEMS 
                            if self.agent.discovered_resources[item]}
