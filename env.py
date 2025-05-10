@@ -9,7 +9,8 @@ class State:
     available: FrozenSet[str]
 
 class CraftingDomain:
-    VALID_ACTIONS = {'hold', 'drop', 'build', 'decompose'}
+    #VALID_ACTIONS = {'hold', 'drop', 'build', 'decompose'}
+    VALID_ACTIONS = {'hold', 'drop', 'build'}
     BASIC_ITEMS = {'Iron', 'Fuel', 'Copper', 'Stone', 'Wood'}
     
     def __init__(self, allowed_actions: Collection[str] = VALID_ACTIONS,
@@ -182,6 +183,8 @@ class Agent:
         item = grid.remove_item(self.x, self.y)
         if item:
             self.inventory.append(item)
+            # Remove collected location from discovered resources
+            self.discovered_resources[item].discard((self.x, self.y))
             return True, f"Collected {item}"
         return False, "No items here"
 
@@ -190,6 +193,7 @@ class Agent:
             return False, "Item not in inventory"
         if grid.place_item(self.x, self.y, item):
             self.inventory.remove(item)
+            # Add new dropped item location to discoveries
             self.discovered_resources[item].add((self.x, self.y))
             return True, f"Dropped {item}"
         return False, "Cell occupied"
@@ -315,4 +319,4 @@ class Game:
 
 if __name__ == "__main__":
     game = Game()
-    game.automated_crafting_mission("Iron")
+    game.automated_crafting_mission("Hybrid_Drive")
