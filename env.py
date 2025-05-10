@@ -247,44 +247,60 @@ class Game:
                 if steps >= max_steps:
                     break
                 try:
-                    self.execute_action(action)
+                    steps_taken = self.execute_action(action)
+                    steps += steps_taken
+                    self.update_discoveries()
                 except Exception as e:
                     print(f"Action failed: {action} - {str(e)}")
                     break
-                steps += 1
-                self.update_discoveries()
 
         self.mission_result(target, steps)
         print(self.grid.item_locations)
         
 
-    def execute_action(self, action: str):
+    def execute_action(self, action: str) -> int:
         cmd, *rest = action.split()
         item = ' '.join(rest)
         
         if cmd == "hold":
-            self.collect_item(item)
+            return self.collect_item(item)
         elif cmd == "drop":
             success, msg = self.agent.drop(self.grid, item)
             if not success:
                 raise RuntimeError(msg)
+            return 1
         elif cmd == "build":
             self.craft_item(item)
+            return 1
         elif cmd == "decompose":
             self.decompose_item(item)
+            return 1
         else:
             raise ValueError(f"Unknown action: {action}")
 
-    def collect_item(self, item: str):
+    def collect_item(self, item: str) -> int:
         if not self.agent.discovered_resources[item]:
             raise ValueError(f"No known {item} locations")
         
+        original_x = self.agent.x
+        original_y = self.agent.y
+        
         closest = min(self.agent.discovered_resources[item],
-                     key=lambda p: abs(p[0]-self.agent.x) + abs(p[1]-self.agent.y))
+                     key=lambda p: abs(p[0]-original_x) + abs(p[1]-original_y))
+        
+        # Calculate Manhattan distance
+        distance = abs(closest[0] - original_x) + abs(closest[1] - original_y)
+        
+        # Update agent position (simulate movement)
         self.agent.x, self.agent.y = closest
+        
+        # Perform collection
         success, msg = self.agent.collect(self.grid)
         if not success:
             raise RuntimeError(msg)
+        
+        # Return total steps taken: distance + 1 (collect action)
+        return distance + 1
 
     def craft_item(self, target: str):
         components = self.crafting_domain.RECIPES.get(target)
