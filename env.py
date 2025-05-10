@@ -191,12 +191,32 @@ class Agent:
     def drop(self, grid: GridWorld, item: str) -> Tuple[bool, str]:
         if item not in self.inventory:
             return False, "Item not in inventory"
-        if grid.place_item(self.x, self.y, item):
-            self.inventory.remove(item)
-            # Add new dropped item location to discoveries
-            self.discovered_resources[item].add((self.x, self.y))
-            return True, f"Dropped {item}"
-        return False, "Cell occupied"
+        
+        # Keep trying until placement succeeds
+        while True:
+            # Try to place the item in the current position
+            if grid.place_item(self.x, self.y, item):
+                self.inventory.remove(item)
+                self.discovered_resources[item].add((self.x, self.y))
+                return True, f"Dropped {item}"
+            
+            # If current cell is occupied, move to a random adjacent cell
+            directions = [(0, 1), (0, -1), (1, 0), (-1, 0)]
+            random.shuffle(directions)  # Randomize direction order
+            
+            moved = False
+            for dx, dy in directions:
+                # Attempt to move in this direction
+                if self.move(dx, dy, grid):
+                    moved = True
+                    break  # Move once and retry
+            
+            if not moved:
+                # Edge case: agent is at grid boundary and all moves are invalid
+                # This should be extremely rare given grid size, but continue trying
+                continue
+            
+        return False
 
 class Game:
     def __init__(self):
