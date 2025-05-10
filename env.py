@@ -162,20 +162,23 @@ class GridWorld:
         return False
 
 class Agent:
-    def __init__(self, x=50, y=50):
+    def __init__(self, x=25, y=25):
         self.x = x
         self.y = y
         self.inventory = []
         self.max_inventory = 3
         self.discovered_resources = defaultdict(set)
-        self.visited_cells = set()
+        self.visitation_counts = defaultdict(int)
+        # Initialize starting position count
+        self.visitation_counts[(x, y)] = 1
 
     def move(self, dx: int, dy: int, grid: GridWorld) -> bool:
         new_x = self.x + dx
         new_y = self.y + dy
         if 0 <= new_x < grid.width and 0 <= new_y < grid.height:
+            # Update position and visitation count
             self.x, self.y = new_x, new_y
-            self.visited_cells.add((new_x, new_y))
+            self.visitation_counts[(new_x, new_y)] += 1
             return True
         return False
 
@@ -227,6 +230,26 @@ class Agent:
         self.inventory.remove(item)
         return True, f"Destroyed {item}"
 
+    
+    def choose_direction(self, grid: GridWorld) -> Tuple[int, int]:
+        """Choose direction based on least-visited adjacent cells"""
+        directions = [(0, 1), (0, -1), (1, 0), (-1, 0)]
+        neighbor_counts = []
+        
+        # Evaluate all possible moves
+        for dx, dy in directions:
+            nx, ny = self.x + dx, self.y + dy
+            if 0 <= nx < grid.width and 0 <= ny < grid.height:
+                count = self.visitation_counts.get((nx, ny), 0)
+                neighbor_counts.append((count, dx, dy))
+        
+        # Find minimum visitation count
+        if not neighbor_counts:
+            return (0, 0)  # Can't move
+        min_count = min([c[0] for c in neighbor_counts])
+        candidates = [(dx, dy) for cnt, dx, dy in neighbor_counts if cnt == min_count]
+        return random.choice(candidates)
+
 class Game:
     def __init__(self):
         self.grid = GridWorld()
@@ -251,7 +274,7 @@ class Game:
                 self.agent.destroy(target)
                 timestep_list.append(steps-t)
                 t = steps
-                #print(f'Sucessfully built {target} in {timestep_list[-1]}')
+                #print(f'Sucessfully built {target} in {steps}')
                 
                 try:
                     target = list_of_targets.pop(0)
@@ -266,7 +289,7 @@ class Game:
             plan = self.crafting_domain.find_plan(target, known_basics, set(self.agent.inventory))
             
             if not plan:
-                self.random_exploration()
+                self.systematic_exploration()
                 steps += 1
                 continue
             
@@ -365,6 +388,11 @@ class Game:
         dx, dy = random.choice([(0,1), (0,-1), (1,0), (-1,0)])
         self.agent.move(dx, dy, self.grid)
 
+    def systematic_exploration(self):
+        """Replaces random_exploration with systematic movement"""
+        dx, dy = self.agent.choose_direction(self.grid)
+        self.agent.move(dx, dy, self.grid)
+
     def print_status(self, steps: int):
         print(f"\n⏱ Step {steps} Report:")
         print(f"📍 Position: ({self.agent.x}, {self.agent.y})")
@@ -383,18 +411,18 @@ class Game:
 
 if __name__ == "__main__":
     game = Game()
-
+    """
     answ = []
     for i in tqdm(range(100)):
-        answ.append(game.automated_crafting_mission(["Hybrid_Drive"]*20))
+        answ.append(game.automated_crafting_mission(["Hybrid_Drive"]*50))
         #print(len(answ[-1]))
 
     print("Hybrid_Drive")
     print(np.array(answ).shape)
     print(list(np.mean(np.array(answ), axis = 0)))
-
+    """
     BASIC_ITEMS = {'Iron', 'Fuel', 'Copper', 'Stone', 'Wood'}
-    basic_itemlist = random.choices(list(BASIC_ITEMS), k=20)
+    basic_itemlist = random.choices(list(BASIC_ITEMS), k=50)
 
     answ = []
     for i in tqdm(range(100)):
@@ -406,7 +434,7 @@ if __name__ == "__main__":
     print(list(np.mean(np.array(answ), axis = 0)))
 
     COMPLEX_ITEMS_1 = {'Basic_Engine', 'Thermal_Core', 'Steam_Generator', 'Copper_Furnace' }
-    complex_itemlist_1 = random.choices(list(COMPLEX_ITEMS_1), k=20)
+    complex_itemlist_1 = random.choices(list(COMPLEX_ITEMS_1), k=50)
 
     answ = []
     for i in tqdm(range(100)):
@@ -420,7 +448,7 @@ if __name__ == "__main__":
 
     COMPLEX_ITEMS_2 = {'Aerial_Transport', 'Reinforced_Frame', 'Steam_Cart' }
 
-    complex_itemlist_2 = random.choices(list(COMPLEX_ITEMS_2), k=20)
+    complex_itemlist_2 = random.choices(list(COMPLEX_ITEMS_2), k=50)
 
     answ = []
     for i in tqdm(range(100)):
