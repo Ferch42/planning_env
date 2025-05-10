@@ -112,7 +112,7 @@ class CraftingDomain:
 class GridWorld:
     BASIC_ITEMS = {'Iron', 'Fuel', 'Copper', 'Stone', 'Wood'}
     
-    def __init__(self, width=50, height=50):
+    def __init__(self, width=100, height=100):
         self.width = width
         self.height = height
         self.grid = [[None for _ in range(width)] for _ in range(height)]
@@ -162,7 +162,7 @@ class GridWorld:
         return False
 
 class Agent:
-    def __init__(self, x=25, y=25):
+    def __init__(self, x=50, y=50):
         self.x = x
         self.y = y
         self.inventory = []
@@ -358,7 +358,7 @@ class Game:
     def update_discoveries(self):
         for item in self.grid.item_locations:
             for x, y in self.grid.item_locations[item]:
-                if abs(x-self.agent.x) <= 5 and abs(y-self.agent.y) <= 5:
+                if abs(x-self.agent.x) <= 10 and abs(y-self.agent.y) <= 10:
                     self.agent.discovered_resources[item].add((x, y))
 
     def random_exploration(self):
