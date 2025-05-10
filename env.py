@@ -2,6 +2,8 @@ from dataclasses import dataclass
 from typing import FrozenSet, Dict, List, Optional, Collection, Set, Tuple, DefaultDict
 from collections import deque, defaultdict
 import random
+import numpy as np
+from tqdm import tqdm
 
 @dataclass(frozen=True)
 class State:
@@ -127,7 +129,7 @@ class GridWorld:
         # Place 2 of each basic item at random positions
         for item in self.BASIC_ITEMS:
             placed = 0
-            while placed < 2:
+            while placed < 10:
                 x = random.randint(0, self.width-1)
                 y = random.randint(0, self.height-1)
                 if self.grid[y][x] is None:
@@ -231,8 +233,11 @@ class Game:
         self.agent = Agent()
         self.crafting_domain = CraftingDomain()
 
-    def automated_crafting_mission(self, list_of_targets: List[str], max_steps=100000):
-        print(f"\n🚀 Starting mission to craft {list_of_targets}!")
+    def automated_crafting_mission(self, list_of_targets: List[str], max_steps=1_000_000):
+        #print(f"\n🚀 Starting mission to craft {list_of_targets}!")
+        
+        timestep_list = []
+        t = 0
         steps = 0
         
         target = list_of_targets.pop(0)
@@ -244,7 +249,10 @@ class Game:
             if target in self.agent.inventory:
 
                 self.agent.destroy(target)
-                print(f'Sucessfully built {target} in {steps}')
+                timestep_list.append(steps-t)
+                t = steps
+                #print(f'Sucessfully built {target} in {timestep_list[-1]}')
+                
                 try:
                     target = list_of_targets.pop(0)
                 except:
@@ -272,7 +280,8 @@ class Game:
                 except Exception as e:
                     print(f"Action failed: {action} - {str(e)}")
                     break
-
+        
+        return timestep_list
         
 
     def execute_action(self, action: str) -> int:
@@ -374,4 +383,51 @@ class Game:
 
 if __name__ == "__main__":
     game = Game()
-    game.automated_crafting_mission(["Iron"]*10)
+
+    answ = []
+    for i in tqdm(range(100)):
+        answ.append(game.automated_crafting_mission(["Hybrid_Drive"]*20))
+        #print(len(answ[-1]))
+
+    print("Hybrid_Drive")
+    print(np.array(answ).shape)
+    print(list(np.mean(np.array(answ), axis = 0)))
+
+    BASIC_ITEMS = {'Iron', 'Fuel', 'Copper', 'Stone', 'Wood'}
+    basic_itemlist = random.choices(list(BASIC_ITEMS), k=20)
+
+    answ = []
+    for i in tqdm(range(100)):
+        answ.append(game.automated_crafting_mission(basic_itemlist.copy()))
+        #print(len(answ[-1]))
+
+    print("Basic Items")
+    print(np.array(answ).shape)
+    print(list(np.mean(np.array(answ), axis = 0)))
+
+    COMPLEX_ITEMS_1 = {'Basic_Engine', 'Thermal_Core', 'Steam_Generator', 'Copper_Furnace' }
+    complex_itemlist_1 = random.choices(list(COMPLEX_ITEMS_1), k=20)
+
+    answ = []
+    for i in tqdm(range(100)):
+        answ.append(game.automated_crafting_mission(complex_itemlist_1.copy()))
+        #print(len(answ[-1]))
+
+    print("Complex Items 1")
+    print(np.array(answ).shape)
+    print(list(np.mean(np.array(answ), axis = 0)))
+
+
+    COMPLEX_ITEMS_2 = {'Aerial_Transport', 'Reinforced_Frame', 'Steam_Cart' }
+
+    complex_itemlist_2 = random.choices(list(COMPLEX_ITEMS_2), k=20)
+
+    answ = []
+    for i in tqdm(range(100)):
+        answ.append(game.automated_crafting_mission(complex_itemlist_2.copy()))
+        #print(len(answ[-1]))
+
+    print("Complex Items 2")
+    print(np.array(answ).shape)
+    print(list(np.mean(np.array(answ), axis = 0)))
+    
