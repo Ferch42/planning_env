@@ -231,18 +231,25 @@ class Game:
         self.agent = Agent()
         self.crafting_domain = CraftingDomain()
 
-    def automated_crafting_mission(self, target: str, max_steps=100000):
-        print(f"\n🚀 Starting mission to craft {target}!")
+    def automated_crafting_mission(self, list_of_targets: List[str], max_steps=100000):
+        print(f"\n🚀 Starting mission to craft {list_of_targets}!")
         steps = 0
         
+        target = list_of_targets.pop(0)
         while steps < max_steps:
-            if steps % 10000 == 0:
-                self.print_status(steps)
+            
+            #if steps % 10000 == 0:
+            #    self.print_status(steps)
             
             if target in self.agent.inventory:
 
                 self.agent.destroy(target)
                 print(f'Sucessfully built {target} in {steps}')
+                try:
+                    target = list_of_targets.pop(0)
+                except:
+                    break
+                
 
             self.update_discoveries()
             known_basics = {item for item in self.grid.BASIC_ITEMS 
@@ -266,8 +273,6 @@ class Game:
                     print(f"Action failed: {action} - {str(e)}")
                     break
 
-        self.mission_result(target, steps)
-        print(self.grid.item_locations)
         
 
     def execute_action(self, action: str) -> int:
@@ -369,4 +374,4 @@ class Game:
 
 if __name__ == "__main__":
     game = Game()
-    game.automated_crafting_mission("Hybrid_Drive")
+    game.automated_crafting_mission(["Hybrid_Drive"]*10)
