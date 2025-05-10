@@ -315,4 +315,4 @@ class Game:
 
 if __name__ == "__main__":
     game = Game()
-    game.automated_crafting_mission("Hybrid_Drive")
+    game.automated_crafting_mission("Iron")
