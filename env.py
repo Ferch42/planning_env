@@ -112,7 +112,7 @@ class CraftingDomain:
 class GridWorld:
     BASIC_ITEMS = {'Iron', 'Fuel', 'Copper', 'Stone', 'Wood'}
     
-    def __init__(self, width=100, height=100):
+    def __init__(self, width=50, height=50):
         self.width = width
         self.height = height
         self.grid = [[None for _ in range(width)] for _ in range(height)]
@@ -275,6 +275,7 @@ class Game:
                 timestep_list.append(steps-t)
                 t = steps
                 #print(f'Sucessfully built {target} in {steps}')
+                #self.print_status(steps)
                 
                 try:
                     target = list_of_targets.pop(0)
@@ -381,7 +382,7 @@ class Game:
     def update_discoveries(self):
         for item in self.grid.item_locations:
             for x, y in self.grid.item_locations[item]:
-                if abs(x-self.agent.x) <= 10 and abs(y-self.agent.y) <= 10:
+                if abs(x-self.agent.x) <= 5 and abs(y-self.agent.y) <= 5:
                     self.agent.discovered_resources[item].add((x, y))
 
     def random_exploration(self):
@@ -411,6 +412,24 @@ class Game:
 
 if __name__ == "__main__":
     game = Game()
+    BASIC_ITEMS = {'Iron', 'Fuel', 'Copper', 'Stone', 'Wood'}
+    basic_itemlist = random.choices(list(BASIC_ITEMS), k=20)
+    basic_itemlist = ['Iron']*20
+
+    answ = []
+    for i in tqdm(range(10_000)):
+        game = Game()
+        answ.append(game.automated_crafting_mission(basic_itemlist.copy()))
+        #print(len(answ[-1]))
+        if i%1_000==0:
+
+            print("Basic Items")
+            print(np.array(answ).shape)
+            print(list(np.mean(np.array(answ), axis = 0)))
+
+    print("Basic Items")
+    print(np.array(answ).shape)
+    print(list(np.mean(np.array(answ), axis = 0)))
     """
     answ = []
     for i in tqdm(range(100)):
@@ -420,12 +439,12 @@ if __name__ == "__main__":
     print("Hybrid_Drive")
     print(np.array(answ).shape)
     print(list(np.mean(np.array(answ), axis = 0)))
-    """
+    
     BASIC_ITEMS = {'Iron', 'Fuel', 'Copper', 'Stone', 'Wood'}
-    basic_itemlist = random.choices(list(BASIC_ITEMS), k=50)
+    basic_itemlist = random.choices(list(BASIC_ITEMS), k=20)
 
     answ = []
-    for i in tqdm(range(100)):
+    for i in tqdm(range(1000)):
         answ.append(game.automated_crafting_mission(basic_itemlist.copy()))
         #print(len(answ[-1]))
 
@@ -459,3 +478,4 @@ if __name__ == "__main__":
     print(np.array(answ).shape)
     print(list(np.mean(np.array(answ), axis = 0)))
     
+    """
