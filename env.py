@@ -162,7 +162,7 @@ class GridWorld:
         return False
 
 class Agent:
-    def __init__(self, x=25, y=25):
+    def __init__(self, x=0, y=0):
         self.x = x
         self.y = y
         self.inventory = []
@@ -260,6 +260,7 @@ class Game:
         #print(f"\n🚀 Starting mission to craft {list_of_targets}!")
         
         timestep_list = []
+        exploration_list = []
         t = 0
         steps = 0
         
@@ -293,6 +294,9 @@ class Game:
                 self.systematic_exploration()
                 steps += 1
                 continue
+
+            if plan:
+                exploration_list.append(steps-t)
             
             for action in plan:
                 if steps >= max_steps:
@@ -305,8 +309,8 @@ class Game:
                     print(f"Action failed: {action} - {str(e)}")
                     break
         
-        return timestep_list
-        
+        return timestep_list, exploration_list
+        #return exploration_list
 
     def execute_action(self, action: str) -> int:
         cmd, *rest = action.split()
@@ -413,27 +417,29 @@ class Game:
 if __name__ == "__main__":
     game = Game()
     BASIC_ITEMS = {'Iron', 'Fuel', 'Copper', 'Stone', 'Wood'}
-    basic_itemlist = random.choices(list(BASIC_ITEMS), k=20)
-    basic_itemlist = ['Iron']*20
+    basic_itemlist = random.choices(list(BASIC_ITEMS), k=100)
+    #basic_itemlist = ['Iron']*20
 
     answ = []
-    for i in tqdm(range(10_000)):
+    answ_2 = []
+    for i in tqdm(range(1000)):
         game = Game()
-        answ.append(game.automated_crafting_mission(basic_itemlist.copy()))
-        #print(len(answ[-1]))
-        if i%1_000==0:
-
-            print("Basic Items")
-            print(np.array(answ).shape)
-            print(list(np.mean(np.array(answ), axis = 0)))
+        a, b  = game.automated_crafting_mission(basic_itemlist.copy())
+        answ.append(a)
+        answ_2.append(b)
+        #print(len(answ[-1])
 
     print("Basic Items")
     print(np.array(answ).shape)
     print(list(np.mean(np.array(answ), axis = 0)))
+    print(np.array(answ_2).shape)
+    print(list(np.mean(np.array(answ_2), axis = 0)))
+    
+    
     """
     answ = []
-    for i in tqdm(range(100)):
-        answ.append(game.automated_crafting_mission(["Hybrid_Drive"]*50))
+    for i in tqdm(range(1000)):
+        answ.append(game.automated_crafting_mission(["Hybrid_Drive"]*100))
         #print(len(answ[-1]))
 
     print("Hybrid_Drive")
