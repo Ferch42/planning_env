@@ -313,6 +313,7 @@ class Game:
         #return exploration_list
 
     def execute_action(self, action: str) -> int:
+        print(action)
         cmd, *rest = action.split()
         item = ' '.join(rest)
         
@@ -416,72 +417,11 @@ class Game:
 
 if __name__ == "__main__":
     game = Game()
-    BASIC_ITEMS = {'Iron', 'Fuel', 'Copper', 'Stone', 'Wood'}
-    basic_itemlist = random.choices(list(BASIC_ITEMS), k=100)
-    #basic_itemlist = ['Iron']*20
-
-    answ = []
-    answ_2 = []
-    for i in tqdm(range(1000)):
-        game = Game()
-        a, b  = game.automated_crafting_mission(basic_itemlist.copy())
-        answ.append(a)
-        answ_2.append(b)
-        #print(len(answ[-1])
-
-    print("Basic Items")
-    print(np.array(answ).shape)
-    print(list(np.mean(np.array(answ), axis = 0)))
-    print(np.array(answ_2).shape)
-    print(list(np.mean(np.array(answ_2), axis = 0)))
     
+    #BASIC_ITEMS = {'Iron', 'Fuel', 'Copper', 'Stone', 'Wood'}
     
-    """
-    answ = []
-    for i in tqdm(range(1000)):
-        answ.append(game.automated_crafting_mission(["Hybrid_Drive"]*100))
-        #print(len(answ[-1]))
+    basic_itemlist = ['Hybrid_Drive']#*20
 
-    print("Hybrid_Drive")
-    print(np.array(answ).shape)
-    print(list(np.mean(np.array(answ), axis = 0)))
+    game = Game()
+    a, b  = game.automated_crafting_mission(basic_itemlist.copy())
     
-    BASIC_ITEMS = {'Iron', 'Fuel', 'Copper', 'Stone', 'Wood'}
-    basic_itemlist = random.choices(list(BASIC_ITEMS), k=20)
-
-    answ = []
-    for i in tqdm(range(1000)):
-        answ.append(game.automated_crafting_mission(basic_itemlist.copy()))
-        #print(len(answ[-1]))
-
-    print("Basic Items")
-    print(np.array(answ).shape)
-    print(list(np.mean(np.array(answ), axis = 0)))
-
-    COMPLEX_ITEMS_1 = {'Basic_Engine', 'Thermal_Core', 'Steam_Generator', 'Copper_Furnace' }
-    complex_itemlist_1 = random.choices(list(COMPLEX_ITEMS_1), k=50)
-
-    answ = []
-    for i in tqdm(range(100)):
-        answ.append(game.automated_crafting_mission(complex_itemlist_1.copy()))
-        #print(len(answ[-1]))
-
-    print("Complex Items 1")
-    print(np.array(answ).shape)
-    print(list(np.mean(np.array(answ), axis = 0)))
-
-
-    COMPLEX_ITEMS_2 = {'Aerial_Transport', 'Reinforced_Frame', 'Steam_Cart' }
-
-    complex_itemlist_2 = random.choices(list(COMPLEX_ITEMS_2), k=50)
-
-    answ = []
-    for i in tqdm(range(100)):
-        answ.append(game.automated_crafting_mission(complex_itemlist_2.copy()))
-        #print(len(answ[-1]))
-
-    print("Complex Items 2")
-    print(np.array(answ).shape)
-    print(list(np.mean(np.array(answ), axis = 0)))
-    
-    """
