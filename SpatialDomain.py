@@ -9,15 +9,9 @@ class State:
 class SpatialDomain:
     VALID_ACTIONS = {'goto', 'pickup', 'putdown', 'placenear'}
     
-    def __init__(self, locations: Set[str], objects: Set[str], connections: Set[Tuple[str, str]]):
+    def __init__(self, locations: Set[str], objects: Set[str]):
         self.locations = locations
         self.objects = objects
-        self.connections = connections  # Bidirectional location connections
-        # Create adjacency list for efficient movement
-        self.adjacency: Dict[str, Set[str]] = {loc: set() for loc in locations}
-        for loc1, loc2 in connections:
-            self.adjacency[loc1].add(loc2)
-            self.adjacency[loc2].add(loc1)
 
     # ====== Predicate Evaluation Methods ======
     def get_agent_location(self, state: State) -> Optional[str]:
@@ -50,23 +44,23 @@ class SpatialDomain:
 
     # ====== Action Implementation ======
     def goto(self, state: State, new_loc: str) -> Optional[State]:
+        if new_loc not in self.locations:
+            return None  # Invalid location
+            
         current_loc = self.get_agent_location(state)
-        if current_loc is None or new_loc not in self.adjacency.get(current_loc, set()):
-            return None  # Invalid move
+        if current_loc == new_loc:
+            return None  # Already at location
             
         new_predicates = set(state.predicates)
-        # Remove current agent location
-        new_predicates.discard(('agent_at', current_loc))
-        # Add new agent location
+        if current_loc:
+            new_predicates.discard(('agent_at', current_loc))
         new_predicates.add(('agent_at', new_loc))
         return State(frozenset(new_predicates))
 
     def pickup(self, state: State, obj: str) -> Optional[State]:
-        # Check if agent is already holding something
         if self.is_holding(state):
-            return None
+            return None  # Already holding something
             
-        # Check if object is available at agent's location
         agent_loc = self.get_agent_location(state)
         obj_loc = self.get_object_location(state, obj)
         
@@ -74,9 +68,7 @@ class SpatialDomain:
             return None  # Object not at agent's location
             
         new_predicates = set(state.predicates)
-        # Remove location predicate
         new_predicates.discard(('at', obj, obj_loc))
-        # Add holding predicate
         new_predicates.add(('holding', obj))
         return State(frozenset(new_predicates))
 
@@ -90,34 +82,26 @@ class SpatialDomain:
             return None
             
         new_predicates = set(state.predicates)
-        # Remove holding predicate
         new_predicates.discard(('holding', obj))
-        # Add location predicate at agent's current location
         new_predicates.add(('at', obj, agent_loc))
         return State(frozenset(new_predicates))
 
     def placenear(self, state: State, target_obj: str) -> Optional[State]:
-        # Get held object
         held_obj = self.get_held_object(state)
         if held_obj is None:
             return None
             
-        # Target object must be placed
         target_loc = self.get_object_location(state, target_obj)
         if target_loc is None:
             return None
             
-        # Both objects must be at the same location
         agent_loc = self.get_agent_location(state)
         if agent_loc != target_loc:
             return None
             
         new_predicates = set(state.predicates)
-        # Remove holding predicate
         new_predicates.discard(('holding', held_obj))
-        # Add location predicate at agent's current location
         new_predicates.add(('at', held_obj, agent_loc))
-        # Add near relationship
         new_predicates.add(('near', held_obj, target_obj))
         return State(frozenset(new_predicates))
 
@@ -140,7 +124,6 @@ class SpatialDomain:
                 return self.get_agent_location(state) == formula[1]
                 
             elif operator == 'holding':
-                # Check if holding a specific object
                 if len(formula) == 1:
                     return self.is_holding(state)
                 return self.get_held_object(state) == formula[1]
@@ -151,17 +134,15 @@ class SpatialDomain:
             elif operator == 'near':
                 return self.are_near(state, formula[1], formula[2])
                 
-            # Handle atomic predicates directly
             return formula in state.predicates
             
-        # Handle atomic predicates specified as strings
         return formula in state.predicates
 
     # ====== Planning Algorithm ======
     def find_plan(
         self,
         initial_state: State,
-        goal_formula: Any,  # Logical formula defining the goal
+        goal_formula: Any,
         max_depth: int = 1000
     ) -> List[str]:
         queue = deque([(initial_state, [])])
@@ -188,22 +169,22 @@ class SpatialDomain:
         actions = []
         agent_loc = self.get_agent_location(state)
         
-        # Movement actions
-        if agent_loc:
-            for neighbor in self.adjacency.get(agent_loc, []):
-                actions.append(f"goto {neighbor}")
+        # Movement actions - can go to any location except current
+        for loc in self.locations:
+            if loc != agent_loc:
+                actions.append(f"goto {loc}")
         
-        # Pickup actions - only if not holding anything
+        # Pickup actions
         if not self.is_holding(state):
             for obj in self.objects:
                 if self.get_object_location(state, obj) == agent_loc:
                     actions.append(f"pickup {obj}")
         
-        # Putdown action - only if holding something
+        # Putdown action
         if self.is_holding(state):
             actions.append("putdown")
         
-        # Placenear actions - only if holding something and target is in same room
+        # Placenear actions
         if self.is_holding(state):
             held_obj = self.get_held_object(state)
             for target_obj in self.objects:
@@ -231,9 +212,8 @@ class SpatialDomain:
 
 if __name__=='__main__':
 
-    # Define world geometry
+    # Define world - no connections needed
     locations = {"kitchen", "living_room", "bedroom"}
-    connections = {("kitchen", "living_room"), ("living_room", "bedroom")}
     objects = {"book", "cup", "apple"}
 
     # Initial state: agent in kitchen, objects in living room
@@ -246,20 +226,14 @@ if __name__=='__main__':
     initial_state = State(frozenset(initial_predicates))
 
     # Goal: Book near cup in the bedroom
-    goal = ('or',
-        ('and',
-            ('near', 'book', 'cup'),
-            ('at', 'book', 'bedroom'),
-            ('at', 'cup', 'bedroom')
-        ),
-        ('and',
-            ('near', 'apple', 'cup'),
-            ('at', 'apple', 'kitchen'),
-            ('at', 'cup', 'kitchen')
-        )
+    goal_formula = ('and',
+        ('agent_at', 'bedroom'),
+        ('near', 'book', 'cup'),
+        ('at', 'book', 'bedroom'),
+        ('at', 'cup', 'bedroom')
     )
 
-    # Create domain and find plan
-    domain = SpatialDomain(locations, objects, connections)
-    plan = domain.find_plan(initial_state, goal)
+    # Create domain
+    domain = SpatialDomain(locations, objects)
+    plan = domain.find_plan(initial_state, goal_formula)
     print("Plan:", plan)
