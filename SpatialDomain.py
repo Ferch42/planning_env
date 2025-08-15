@@ -246,14 +246,20 @@ if __name__=='__main__':
     initial_state = State(frozenset(initial_predicates))
 
     # Goal: Book near cup in the bedroom
-    goal_formula = ('and',
-        ('agent_at', 'bedroom'),
-        ('near', 'book', 'cup'),
-        ('at', 'book', 'bedroom'),
-        ('at', 'cup', 'bedroom')
+    goal = ('or',
+        ('and',
+            ('near', 'book', 'cup'),
+            ('at', 'book', 'bedroom'),
+            ('at', 'cup', 'bedroom')
+        ),
+        ('and',
+            ('near', 'apple', 'cup'),
+            ('at', 'apple', 'kitchen'),
+            ('at', 'cup', 'kitchen')
+        )
     )
 
     # Create domain and find plan
     domain = SpatialDomain(locations, objects, connections)
-    plan = domain.find_plan(initial_state, goal_formula)
+    plan = domain.find_plan(initial_state, goal)
     print("Plan:", plan)
