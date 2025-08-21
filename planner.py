@@ -209,7 +209,7 @@ class SpatialDomain:
         return None
 
 class GridWorld:
-    def __init__(self, width=100, height=100, perception_radius=20):
+    def __init__(self, width=20, height=20, perception_radius=5):
         self.width = width
         self.height = height
         self.perception_radius = perception_radius
@@ -222,10 +222,12 @@ class GridWorld:
             'D': (width//2, height//2, width, height)
         }
         
-        # Center point of each location
+        # Center point of each location (using integer division)
         self.location_centers = {
-            loc: (x1 + (x2 - x1)//2, y1 + (y2 - y1)//2)
-            for loc, (x1, y1, x2, y2) in self.locations.items()
+            'A': (width//4, height//4),
+            'B': (3*width//4, height//4),
+            'C': (width//4, 3*height//4),
+            'D': (3*width//4, 3*height//4)
         }
         
         # Objects in the world
@@ -244,8 +246,9 @@ class GridWorld:
         for obj in self.objects:
             loc = random.choice(list(self.locations.keys()))
             x1, y1, x2, y2 = self.locations[loc]
-            x = random.randint(x1, x2-1)
-            y = random.randint(y1, y2-1)
+            # Ensure objects are placed within the bounds (exclusive of upper bounds)
+            x = random.randint(x1, x2 - 1)
+            y = random.randint(y1, y2 - 1)
             self.object_positions[obj] = (x, y, loc)
     
     def get_agent_location(self):
@@ -382,61 +385,113 @@ class Agent:
         if self.grid_world.move_agent(dx, dy):
             # Update visitation count
             self.visitation_counts[self.grid_world.agent_position] += 1
-            return True
-        return False
+            return True, 1  # Return success and cost of 1 step
+        return False, 0
     
     def find_plan(self, goal_formula):
         return self.domain.find_plan(self.current_state, goal_formula)
     
-    def execute_action(self, action: str) -> bool:
+    def execute_action(self, action: str):
         parts = action.split()
         if not parts:
-            return False
+            return False, 0
             
         cmd = parts[0]
+        cost = 0
+        
         if cmd == "goto" and len(parts) == 2:
             location = parts[1]
-            success = self.grid_world.goto_location(location)
-            if success:
+            # Calculate Manhattan distance to location center
+            current_x, current_y = self.grid_world.agent_position
+            target_x, target_y = self.grid_world.location_centers[location]
+            distance = abs(current_x - target_x) + abs(current_y - target_y)
+            
+            if self.grid_world.goto_location(location):
+                cost = distance
                 self.update_knowledge()
-            return success
+                return True, cost
+                
         elif cmd == "pickup" and len(parts) == 2:
             obj = parts[1]
-            if self.grid_world.pickup_object(obj):
-                self.held_object = obj
-                self.update_knowledge()
-                return True
+            # Check if we know the object's location
+            if obj not in self.knowledge_base['objects']:
+                return False, 0
+                
+            # Calculate distance to object (simplified - using location center)
+            agent_loc = self.grid_world.get_agent_location()
+            obj_loc = self.knowledge_base['objects'][obj]
+            
+            if agent_loc == obj_loc:
+                # Already at the location, cost is just the pickup action
+                if self.grid_world.pickup_object(obj):
+                    self.held_object = obj
+                    self.update_knowledge()
+                    return True, 1  # Cost of pickup action
+            else:
+                # Need to move to the object's location first
+                current_x, current_y = self.grid_world.agent_position
+                target_x, target_y = self.grid_world.location_centers[obj_loc]
+                distance = abs(current_x - target_x) + abs(current_y - target_y)
+                
+                # Move to the location
+                if self.grid_world.goto_location(obj_loc):
+                    cost = distance
+                    # Now pickup the object
+                    if self.grid_world.pickup_object(obj):
+                        self.held_object = obj
+                        self.update_knowledge()
+                        return True, cost + 1  # Movement cost + pickup cost
+                        
         elif cmd == "putdown" and len(parts) == 1:
             if self.held_object and self.grid_world.putdown_object(self.held_object):
                 self.held_object = None
                 self.update_knowledge()
-                return True
+                return True, 1  # Cost of putdown action
+                
         elif cmd == "placenear" and len(parts) == 2:
             # For placenear, we need to be holding an object
             if not self.held_object:
-                return False
+                return False, 0
                 
             target_obj = parts[1]
             # Check if target object is known to be in the current location
             agent_loc = self.grid_world.get_agent_location()
-            if target_obj not in self.knowledge_base['objects'] or self.knowledge_base['objects'][target_obj] != agent_loc:
-                return False
+            if target_obj not in self.knowledge_base['objects']:
+                return False, 0
                 
-            # Place the held object
-            if self.grid_world.putdown_object(self.held_object):
-                # Update knowledge with the object's new location
-                self.knowledge_base['objects'][self.held_object] = agent_loc
+            target_loc = self.knowledge_base['objects'][target_obj]
+            if agent_loc != target_loc:
+                # Need to move to the target object's location
+                current_x, current_y = self.grid_world.agent_position
+                target_x, target_y = self.grid_world.location_centers[target_loc]
+                distance = abs(current_x - target_x) + abs(current_y - target_y)
                 
-                # Add the near relationship to the knowledge base
-                if 'near' not in self.knowledge_base:
-                    self.knowledge_base['near'] = set()
-                self.knowledge_base['near'].add((self.held_object, target_obj))
-                
-                # Update the state to reflect the changes
-                self.update_knowledge()
-                self.held_object = None
-                return True
-        return False
+                # Move to the location
+                if self.grid_world.goto_location(target_loc):
+                    cost = distance
+                    agent_loc = self.grid_world.get_agent_location()
+                    
+            # Now we're at the target location, place the object near the target
+            if self.held_object and target_obj in self.knowledge_base['objects']:
+                agent_loc = self.grid_world.get_agent_location()
+                target_loc = self.knowledge_base['objects'][target_obj]
+                if agent_loc == target_loc:
+                    # Place the held object
+                    if self.grid_world.putdown_object(self.held_object):
+                        # Update knowledge with the object's new location
+                        self.knowledge_base['objects'][self.held_object] = agent_loc
+                        
+                        # Add the near relationship to the knowledge base
+                        if 'near' not in self.knowledge_base:
+                            self.knowledge_base['near'] = set()
+                        self.knowledge_base['near'].add((self.held_object, target_obj))
+                        
+                        # Update the state to reflect the changes
+                        self.update_knowledge()
+                        self.held_object = None
+                        return True, cost + 1  # Movement cost (if any) + placenear cost
+                        
+        return False, 0
 
 class SpatialGame:
     def __init__(self):
@@ -450,30 +505,32 @@ class SpatialGame:
     def automated_mission(self, max_steps=10000, planning_interval=100):
         print(f"Starting mission with goal: {self.goal_formula}")
         
-        steps = 0
+        total_cost = 0
         plan = []
         
-        while steps < max_steps:
+        while total_cost < max_steps:
             # Update agent's knowledge based on current perception
             self.agent.update_knowledge()
             
             # Check if goal is already achieved
             if self.agent.domain.evaluate_formula(self.agent.current_state, self.goal_formula):
-                print(f"Goal achieved in {steps} steps!")
-                return True
+                print(f"Goal achieved with total cost {total_cost}!")
+                return True, total_cost
             
             # Check if we have a plan and execute it
             if plan:
                 action = plan.pop(0)
                 print(f"Executing: {action}")
-                if self.agent.execute_action(action):
-                    print(f"Action successful")
+                success, cost = self.agent.execute_action(action)
+                total_cost += cost
+                if success:
+                    print(f"Action successful, cost: {cost}, total cost: {total_cost}")
                 else:
-                    print(f"Action failed, replanning...")
+                    print(f"Action failed, cost: {cost}, replanning...")
                     plan = []  # Clear plan if action fails
             else:
                 # Check if we can find a plan periodically
-                if steps % planning_interval == 0:
+                if total_cost % planning_interval == 0:
                     print("Attempting to find a plan...")
                     plan = self.agent.find_plan(self.goal_formula)
                     if plan:
@@ -482,12 +539,18 @@ class SpatialGame:
                         print("No plan found, continuing exploration")
                 
                 # Continue exploration
-                self.agent.systematic_exploration()
+                success, cost = self.agent.systematic_exploration()
+                total_cost += cost
+                if success:
+                    print(f"Exploration step, cost: {cost}, total cost: {total_cost}")
             
-            steps += 1
+            # Check if goal is achieved after action
+            if self.agent.domain.evaluate_formula(self.agent.current_state, self.goal_formula):
+                print(f"Goal achieved with total cost {total_cost}!")
+                return True, total_cost
         
         print("Mission failed: timeout reached")
-        return False
+        return False, total_cost
 
 # Example usage
 if __name__ == "__main__":
@@ -503,4 +566,5 @@ if __name__ == "__main__":
     game.set_goal(goal_formula)
     
     # Run the mission
-    game.automated_mission(max_steps=5000, planning_interval=50)
+    success, total_cost = game.automated_mission(max_steps=5000, planning_interval=50)
+    print(f"Mission {'succeeded' if success else 'failed'} with total cost {total_cost}")
