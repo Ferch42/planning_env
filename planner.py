@@ -68,6 +68,10 @@ class SpatialDomain:
             
         new_predicates = set(state.predicates)
         new_predicates.discard(('at', obj, obj_loc))
+        # Remove all near predicates that involve the object being picked up
+        for pred in list(new_predicates):  # Use list to avoid modification during iteration
+            if pred[0] == 'near' and (pred[1] == obj or pred[2] == obj):
+                new_predicates.discard(pred)
         new_predicates.add(('holding', obj))
         return State(frozenset(new_predicates))
 
@@ -141,7 +145,7 @@ class SpatialDomain:
         self,
         initial_state: State,
         goal_formula: Any,
-        max_depth: int = 1000
+        max_depth: int = 20  # Reduced from 1000 to prevent infinite loops
     ) -> List[str]:
         queue = deque([(initial_state, [])])
         visited = set()
@@ -149,27 +153,66 @@ class SpatialDomain:
         
         while queue:
             state, path = queue.popleft()
-            
+            print(state, path)
             if self.evaluate_formula(state, goal_formula):
                 return path
                 
             if len(path) >= max_depth:
                 continue
                 
-            for action in self._generate_actions(state):
+            # Generate actions in a priority order to find solutions faster
+            actions = self._generate_actions(state)
+            
+            # Prioritize actions that directly contribute to the goal
+            prioritized_actions = []
+            other_actions = []
+            
+            for action in actions:
+                if action.startswith("pickup") or action.startswith("placenear"):
+                    # Check if this action directly contributes to the goal
+                    parts = action.split()
+                    if len(parts) >= 2:
+                        obj = parts[1]
+                        # Simple heuristic: prioritize actions involving objects mentioned in the goal
+                        if self._is_object_in_goal(obj, goal_formula):
+                            prioritized_actions.append(action)
+                            continue
+                other_actions.append(action)
+            
+            # Process prioritized actions first
+            for action in prioritized_actions + other_actions:
                 new_state = self.execute(state, action)
+                #print(new_state, state)
                 if new_state and new_state not in visited:
                     visited.add(new_state)
                     queue.append((new_state, path + [action]))
+        
         return []
+
+    def _is_object_in_goal(self, obj: str, goal_formula: Any) -> bool:
+        """Check if an object is mentioned in the goal formula"""
+        if isinstance(goal_formula, tuple):
+            # Recursively check all parts of the formula
+            for part in goal_formula:
+                if self._is_object_in_goal(obj, part):
+                    return True
+        elif isinstance(goal_formula, str):
+            return obj in goal_formula
+        return False
 
     def _generate_actions(self, state: State) -> List[str]:
         actions = []
         agent_loc = self.get_agent_location(state)
         
-        # Movement actions
+        # Movement actions - only generate moves to locations with objects
+        object_locations = set()
+        for obj in self.objects:
+            obj_loc = self.get_object_location(state, obj)
+            if obj_loc:
+                object_locations.add(obj_loc)
+        
         for loc in self.locations:
-            if loc != agent_loc:
+            if loc != agent_loc and loc in object_locations:
                 actions.append(f"goto {loc}")
         
         # Pickup actions
@@ -209,7 +252,7 @@ class SpatialDomain:
         return None
 
 class GridWorld:
-    def __init__(self, width=20, height=20, perception_radius=5):
+    def __init__(self, width=20, height=20, perception_radius=3):
         self.width = width
         self.height = height
         self.perception_radius = perception_radius
@@ -282,7 +325,7 @@ class GridWorld:
         for obj, (x, y, loc) in self.object_positions.items():
             distance = math.sqrt((x - agent_x)**2 + (y - agent_y)**2)
             if distance <= self.perception_radius:
-                perceived[obj] = loc
+                perceived[obj] = (x, y, loc)  # Store exact position and location
                 
         return perceived
     
@@ -310,7 +353,7 @@ class Agent:
     def __init__(self, grid_world):
         self.grid_world = grid_world
         self.knowledge_base = {
-            'objects': {},  # obj: location (if known)
+            'objects': {},  # obj: (x, y, location) - exact position and location
             'agent_loc': grid_world.get_agent_location()
         }
         self.visitation_counts = defaultdict(int)
@@ -335,8 +378,8 @@ class Agent:
         # Agent location
         predicates.add(('agent_at', self.knowledge_base['agent_loc']))
         
-        # Object locations
-        for obj, loc in self.knowledge_base['objects'].items():
+        # Object locations (only location, not exact position)
+        for obj, (x, y, loc) in self.knowledge_base['objects'].items():
             predicates.add(('at', obj, loc))
             
         # Holding status
@@ -353,7 +396,9 @@ class Agent:
     def update_knowledge(self):
         # Update knowledge based on perception
         perceived_objects = self.grid_world.get_perceived_objects()
-        self.knowledge_base['objects'].update(perceived_objects)
+        for obj, (x, y, loc) in perceived_objects.items():
+            self.knowledge_base['objects'][obj] = (x, y, loc)
+            
         self.knowledge_base['agent_loc'] = self.grid_world.get_agent_location()
         
         # Update current state
@@ -412,38 +457,53 @@ class Agent:
                 return True, cost
                 
         elif cmd == "pickup" and len(parts) == 2:
+
+            if self.held_object is not None:
+                return False, 0  # Already holding something, cannot pickup
+            
             obj = parts[1]
-            # Check if we know the object's location
+            # Check if we know the object's exact position
             if obj not in self.knowledge_base['objects']:
                 return False, 0
                 
-            # Calculate distance to object (simplified - using location center)
+            # Get object's exact position
+            obj_x, obj_y, obj_loc = self.knowledge_base['objects'][obj]
+            agent_x, agent_y = self.grid_world.agent_position
             agent_loc = self.grid_world.get_agent_location()
-            obj_loc = self.knowledge_base['objects'][obj]
             
-            if agent_loc == obj_loc:
-                # Already at the location, cost is just the pickup action
-                if self.grid_world.pickup_object(obj):
-                    self.held_object = obj
-                    self.update_knowledge()
-                    return True, 1  # Cost of pickup action
-            else:
+            if agent_loc != obj_loc:
                 # Need to move to the object's location first
-                current_x, current_y = self.grid_world.agent_position
-                target_x, target_y = self.grid_world.location_centers[obj_loc]
-                distance = abs(current_x - target_x) + abs(current_y - target_y)
+                center_x, center_y = self.grid_world.location_centers[obj_loc]
+                distance_to_loc = abs(agent_x - center_x) + abs(agent_y - center_y)
                 
-                # Move to the location
+                # Move to the location center
                 if self.grid_world.goto_location(obj_loc):
-                    cost = distance
-                    # Now pickup the object
-                    if self.grid_world.pickup_object(obj):
-                        self.held_object = obj
-                        self.update_knowledge()
-                        return True, cost + 1  # Movement cost + pickup cost
-                        
+                    cost += distance_to_loc
+                    agent_x, agent_y = center_x, center_y
+            
+            # Calculate distance to object's exact position
+            distance_to_obj = abs(agent_x - obj_x) + abs(agent_y - obj_y)
+            
+            # Move to object's exact position (simulate)
+            self.grid_world.agent_position = (obj_x, obj_y)
+            cost += distance_to_obj
+            
+            # Perform pickup
+            if self.grid_world.pickup_object(obj):
+                # Remove object from knowledge base
+                if obj in self.knowledge_base['objects']:
+                    del self.knowledge_base['objects'][obj]
+                self.held_object = obj
+                self.update_knowledge()
+                return True, cost + 1  # Add cost for pickup action
+                
         elif cmd == "putdown" and len(parts) == 1:
             if self.held_object and self.grid_world.putdown_object(self.held_object):
+                # Update knowledge with object's new position
+                x, y = self.grid_world.agent_position
+                loc = self.grid_world.get_agent_location()
+                self.knowledge_base['objects'][self.held_object] = (x, y, loc)
+                
                 self.held_object = None
                 self.update_knowledge()
                 return True, 1  # Cost of putdown action
@@ -454,42 +514,48 @@ class Agent:
                 return False, 0
                 
             target_obj = parts[1]
-            # Check if target object is known to be in the current location
-            agent_loc = self.grid_world.get_agent_location()
+            # Check if target object is known
             if target_obj not in self.knowledge_base['objects']:
                 return False, 0
                 
-            target_loc = self.knowledge_base['objects'][target_obj]
+            # Get target object's exact position and location
+            target_x, target_y, target_loc = self.knowledge_base['objects'][target_obj]
+            agent_x, agent_y = self.grid_world.agent_position
+            agent_loc = self.grid_world.get_agent_location()
+            
             if agent_loc != target_loc:
                 # Need to move to the target object's location
-                current_x, current_y = self.grid_world.agent_position
-                target_x, target_y = self.grid_world.location_centers[target_loc]
-                distance = abs(current_x - target_x) + abs(current_y - target_y)
+                center_x, center_y = self.grid_world.location_centers[target_loc]
+                distance_to_loc = abs(agent_x - center_x) + abs(agent_y - center_y)
                 
-                # Move to the location
+                # Move to the location center
                 if self.grid_world.goto_location(target_loc):
-                    cost = distance
-                    agent_loc = self.grid_world.get_agent_location()
-                    
-            # Now we're at the target location, place the object near the target
-            if self.held_object and target_obj in self.knowledge_base['objects']:
-                agent_loc = self.grid_world.get_agent_location()
-                target_loc = self.knowledge_base['objects'][target_obj]
-                if agent_loc == target_loc:
-                    # Place the held object
-                    if self.grid_world.putdown_object(self.held_object):
-                        # Update knowledge with the object's new location
-                        self.knowledge_base['objects'][self.held_object] = agent_loc
-                        
-                        # Add the near relationship to the knowledge base
-                        if 'near' not in self.knowledge_base:
-                            self.knowledge_base['near'] = set()
-                        self.knowledge_base['near'].add((self.held_object, target_obj))
-                        
-                        # Update the state to reflect the changes
-                        self.update_knowledge()
-                        self.held_object = None
-                        return True, cost + 1  # Movement cost (if any) + placenear cost
+                    cost += distance_to_loc
+                    agent_x, agent_y = center_x, center_y
+            
+            # Calculate distance to target object's exact position
+            distance_to_target = abs(agent_x - target_x) + abs(agent_y - target_y)
+            
+            # Move to target object's exact position (simulate)
+            self.grid_world.agent_position = (target_x, target_y)
+            cost += distance_to_target
+            
+            # Place the held object near the target
+            if self.grid_world.putdown_object(self.held_object):
+                # Update knowledge with the object's new position
+                x, y = self.grid_world.agent_position
+                loc = self.grid_world.get_agent_location()
+                self.knowledge_base['objects'][self.held_object] = (x, y, loc)
+                
+                # Add the near relationship to the knowledge base
+                if 'near' not in self.knowledge_base:
+                    self.knowledge_base['near'] = set()
+                self.knowledge_base['near'].add((self.held_object, target_obj))
+                self.knowledge_base['near'].add((target_obj, self.held_object))
+                
+                self.held_object = None
+                self.update_knowledge()
+                return True, cost + 1  # Add cost for placenear action
                         
         return False, 0
 
