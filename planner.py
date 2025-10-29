@@ -3,6 +3,7 @@ import math
 from dataclasses import dataclass
 from typing import FrozenSet, List, Optional, Set, Tuple, Any, Dict, DefaultDict
 from collections import deque, defaultdict
+import time
 
 @dataclass(frozen=True)
 class State:
@@ -145,15 +146,23 @@ class SpatialDomain:
         self,
         initial_state: State,
         goal_formula: Any,
-        max_depth: int = 20  # Reduced from 1000 to prevent infinite loops
+        max_depth: int = 100,  # Reduced from 1000 to prevent infinite loops,
+        print_planning: bool = False
     ) -> List[str]:
         queue = deque([(initial_state, [])])
         visited = set()
         visited.add(initial_state)
-        
+        i = 0
         while queue:
             state, path = queue.popleft()
-            print(state, path)
+
+            if print_planning:
+                i+=1
+                print("-----------------------")
+                print(f"Planning state number: {i}")
+                print(state, path)
+                print("++++++++++++++++++++++++++")
+
             if self.evaluate_formula(state, goal_formula):
                 return path
                 
@@ -433,8 +442,8 @@ class Agent:
             return True, 1  # Return success and cost of 1 step
         return False, 0
     
-    def find_plan(self, goal_formula):
-        return self.domain.find_plan(self.current_state, goal_formula)
+    def find_plan(self, goal_formula, print_planning = False):
+        return self.domain.find_plan(self.current_state, goal_formula, print_planning = print_planning)
     
     def execute_action(self, action: str):
         parts = action.split()
@@ -457,10 +466,6 @@ class Agent:
                 return True, cost
                 
         elif cmd == "pickup" and len(parts) == 2:
-
-            if self.held_object is not None:
-                return False, 0  # Already holding something, cannot pickup
-            
             obj = parts[1]
             # Check if we know the object's exact position
             if obj not in self.knowledge_base['objects']:
@@ -598,7 +603,7 @@ class SpatialGame:
                 # Check if we can find a plan periodically
                 if total_cost % planning_interval == 0:
                     print("Attempting to find a plan...")
-                    plan = self.agent.find_plan(self.goal_formula)
+                    plan = self.agent.find_plan(self.goal_formula, print_planning = total_cost>850)
                     if plan:
                         print(f"Found plan: {plan}")
                     else:
