@@ -88,16 +88,120 @@ class GridWorldEnv(gym.Env):
         # Last resort: center of room
         return (x_start + x_end) // 2, (y_start + y_end) // 2
     
+    def _create_minimal_connections(self):
+        """Create minimal connections to ensure all rooms are reachable"""
+        # Create a grid of rooms
+        room_grid = [[f"room_{x}_{y}" for y in range(self.num_rooms_y)] for x in range(self.num_rooms_x)]
+        
+        # Start with room_0_0 and build connections
+        visited = set()
+        to_visit = [(0, 0)]
+        connections = []
+        
+        while to_visit:
+            current_x, current_y = to_visit.pop(0)
+            if (current_x, current_y) in visited:
+                continue
+                
+            visited.add((current_x, current_y))
+            
+            # Get unvisited neighbors
+            neighbors = []
+            for dx, dy in [(0, 1), (1, 0), (0, -1), (-1, 0)]:
+                nx, ny = current_x + dx, current_y + dy
+                if 0 <= nx < self.num_rooms_x and 0 <= ny < self.num_rooms_y:
+                    neighbors.append((nx, ny, dx, dy))
+            
+            # Randomly shuffle neighbors
+            np.random.shuffle(neighbors)
+            
+            # Connect to 1-2 neighbors (not all)
+            num_connections = np.random.randint(1, 3)
+            connected = 0
+            
+            for nx, ny, dx, dy in neighbors:
+                if (nx, ny) not in visited and connected < num_connections:
+                    connections.append((current_x, current_y, nx, ny, dx, dy))
+                    to_visit.append((nx, ny))
+                    connected += 1
+            
+            # If we didn't connect to any new rooms, force at least one connection
+            if connected == 0 and neighbors:
+                nx, ny, dx, dy = neighbors[0]
+                connections.append((current_x, current_y, nx, ny, dx, dy))
+                to_visit.append((nx, ny))
+        
+        return connections
+    
     def _place_doors_between_rooms(self):
-        """Place doors as transitions between rooms - only 0-1 door per boundary"""
+        """Place doors to ensure all rooms are reachable with limited connections"""
         self.doors.clear()
         self.door_positions.clear()
+        
+        # First, create minimal connections to ensure all rooms are reachable
+        connections = self._create_minimal_connections()
+        
+        # Place doors for the connections
+        for current_x, current_y, next_x, next_y, dx, dy in connections:
+            if dx == 1:  # Right connection
+                # Choose a random vertical position for the door
+                y = np.random.randint(current_y * self.room_size, (current_y + 1) * self.room_size)
+                x = (current_x + 1) * self.room_size
+                
+                # Add door in both directions
+                self.doors[(x-1, y)].add((1, 0))  # Right direction
+                self.doors[(x, y)].add((-1, 0))   # Left direction
+                self.door_positions.add((x-1, y, 1, 0))
+                self.door_positions.add((x, y, -1, 0))
+                
+            elif dx == -1:  # Left connection
+                # Choose a random vertical position for the door
+                y = np.random.randint(current_y * self.room_size, (current_y + 1) * self.room_size)
+                x = current_x * self.room_size
+                
+                # Add door in both directions
+                self.doors[(x-1, y)].add((1, 0))  # Right direction
+                self.doors[(x, y)].add((-1, 0))   # Left direction
+                self.door_positions.add((x-1, y, 1, 0))
+                self.door_positions.add((x, y, -1, 0))
+                
+            elif dy == 1:  # Down connection
+                # Choose a random horizontal position for the door
+                x = np.random.randint(current_x * self.room_size, (current_x + 1) * self.room_size)
+                y = (current_y + 1) * self.room_size
+                
+                # Add door in both directions
+                self.doors[(x, y-1)].add((0, 1))  # Down direction
+                self.doors[(x, y)].add((0, -1))   # Up direction
+                self.door_positions.add((x, y-1, 0, 1))
+                self.door_positions.add((x, y, 0, -1))
+                
+            elif dy == -1:  # Up connection
+                # Choose a random horizontal position for the door
+                x = np.random.randint(current_x * self.room_size, (current_x + 1) * self.room_size)
+                y = current_y * self.room_size
+                
+                # Add door in both directions
+                self.doors[(x, y-1)].add((0, 1))  # Down direction
+                self.doors[(x, y)].add((0, -1))   # Up direction
+                self.door_positions.add((x, y-1, 0, 1))
+                self.door_positions.add((x, y, 0, -1))
+        
+        # Add a few extra random doors for variety, but not too many
+        extra_doors = 0
+        max_extra_doors = (self.num_rooms_x * self.num_rooms_y) // 4
         
         # Place vertical doors (between rooms horizontally)
         for room_x in range(self.num_rooms_x - 1):
             for room_y in range(self.num_rooms_y):
-                # 50% chance to place a door on this boundary
-                if np.random.random() < 0.5:
+                # Skip if this connection is already made
+                is_connected = any(
+                    (room_x == cx and room_y == cy and room_x+1 == nx and room_y == ny) or
+                    (room_x+1 == cx and room_y == cy and room_x == nx and room_y == ny)
+                    for cx, cy, nx, ny, _, _ in connections
+                )
+                
+                if not is_connected and extra_doors < max_extra_doors and np.random.random() < 0.15:
                     # Choose 1 random vertical position for door in this boundary
                     y = np.random.randint(room_y * self.room_size, (room_y + 1) * self.room_size)
                     x = (room_x + 1) * self.room_size
@@ -106,14 +210,21 @@ class GridWorldEnv(gym.Env):
                         # Add door in both directions
                         self.doors[(x-1, y)].add((1, 0))  # Right direction
                         self.doors[(x, y)].add((-1, 0))   # Left direction
-                        self.door_positions.add((x-1, y, 1, 0))  # Store for rendering
-                        self.door_positions.add((x, y, -1, 0))   # Store for rendering
+                        self.door_positions.add((x-1, y, 1, 0))
+                        self.door_positions.add((x, y, -1, 0))
+                        extra_doors += 1
         
         # Place horizontal doors (between rooms vertically)
         for room_x in range(self.num_rooms_x):
             for room_y in range(self.num_rooms_y - 1):
-                # 50% chance to place a door on this boundary
-                if np.random.random() < 0.5:
+                # Skip if this connection is already made
+                is_connected = any(
+                    (room_x == cx and room_y == cy and room_x == nx and room_y+1 == ny) or
+                    (room_x == cx and room_y+1 == cy and room_x == nx and room_y == ny)
+                    for cx, cy, nx, ny, _, _ in connections
+                )
+                
+                if not is_connected and extra_doors < max_extra_doors and np.random.random() < 0.15:
                     # Choose 1 random horizontal position for door in this boundary
                     x = np.random.randint(room_x * self.room_size, (room_x + 1) * self.room_size)
                     y = (room_y + 1) * self.room_size
@@ -122,8 +233,9 @@ class GridWorldEnv(gym.Env):
                         # Add door in both directions
                         self.doors[(x, y-1)].add((0, 1))  # Down direction
                         self.doors[(x, y)].add((0, -1))   # Up direction
-                        self.door_positions.add((x, y-1, 0, 1))  # Store for rendering
-                        self.door_positions.add((x, y, 0, -1))   # Store for rendering
+                        self.door_positions.add((x, y-1, 0, 1))
+                        self.door_positions.add((x, y, 0, -1))
+                        extra_doors += 1
     
     def _is_door_between(self, from_pos, to_pos):
         """Check if there's a door allowing movement from from_pos to to_pos"""
@@ -398,7 +510,7 @@ class GridWorldEnv(gym.Env):
         if mode == 'ansi':
             return self._render_ascii()
         
-        # Original image rendering for 'human' and 'rgb_array' modes (no emojis)
+        # Original image rendering for 'human' and 'rgb_array' modes
         fig, ax = plt.subplots(figsize=(16, 16))
         
         # Create color map for objects
@@ -490,7 +602,7 @@ class GridWorldEnv(gym.Env):
         ax.set_xticks(np.arange(0, self.width + 1))
         ax.set_yticks(np.arange(0, self.height + 1))
         ax.grid(True, color='black', linewidth=0.5)
-        ax.set_title(f'GridWorld Environment - {self.room_rows}x{self.room_cols} Rooms (Total: {self.room_rows * self.room_cols})')
+        ax.set_title(f'GridWorld Environment - {self.room_rows}x{self.room_cols} Rooms (Minimal Connections)')
         
         if mode == 'human':
             plt.show()
@@ -528,6 +640,23 @@ class GridWorldEnv(gym.Env):
                         connected_rooms.add(self._get_room_id(new_x, new_y))
         
         return connected_rooms
+    
+    def is_fully_connected(self):
+        """Check if all rooms are reachable from room_0_0"""
+        visited = set()
+        stack = ["room_0_0"]
+        
+        while stack:
+            current_room = stack.pop()
+            if current_room in visited:
+                continue
+            visited.add(current_room)
+            
+            # Add all connected rooms to the stack
+            connected_rooms = self.get_room_connections(current_room)
+            stack.extend(connected_rooms - visited)
+        
+        return len(visited) == len(self.rooms)
 
 # Example usage and testing
 if __name__ == "__main__":
@@ -538,6 +667,9 @@ if __name__ == "__main__":
     obs = env.reset()
     print(f"Initial room: {env.get_agent_room()}")
     print(f"Objects in initial room: {env.get_room_objects(env.get_agent_room())}")
+    
+    # Check if all rooms are reachable
+    print(f"\nAll rooms are reachable: {env.is_fully_connected()}")
     
     # Print room connections
     print(f"\nRoom connections for {env.get_agent_room()}: {env.get_room_connections(env.get_agent_room())}")
