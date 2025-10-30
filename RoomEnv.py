@@ -16,7 +16,7 @@ class ObjectType(Enum):
     WEAPON = 6
 
 class GridWorldEnv(gym.Env):
-    metadata = {'render.modes': ['human', 'rgb_array']}
+    metadata = {'render.modes': ['human', 'rgb_array', 'ansi']}
     
     def __init__(self, width=25, height=25, room_size=5, room_rows=5, room_cols=5):
         super(GridWorldEnv, self).__init__()
@@ -325,8 +325,80 @@ class GridWorldEnv(gym.Env):
         
         return self._get_observation(), reward, done, info
     
+    def _render_ascii(self):
+        """Render the environment as ASCII with improved legibility"""
+        # Character mapping for better legibility
+        chars = {
+            ObjectType.EMPTY.value: '·',
+            ObjectType.KEY.value: 'K',
+            ObjectType.TREASURE.value: 'T',
+            ObjectType.AGENT.value: 'A',
+            ObjectType.OBSTACLE.value: 'X',
+            ObjectType.FOOD.value: 'F',
+            ObjectType.WEAPON.value: 'W'
+        }
+        
+        result = []
+        
+        # Header with room info
+        result.append("=" * 60)
+        result.append(f"GridWorld - {self.room_rows}x{self.room_cols} Rooms")
+        result.append(f"Current Room: {self._get_current_room()}")
+        result.append("=" * 60)
+        result.append("")
+        
+        # Get current room bounds to highlight it
+        current_room = self._get_current_room()
+        room_x1, room_y1, room_x2, room_y2 = self._get_room_bounds(current_room)
+        
+        # Create ASCII representation with room boundaries
+        for y in range(self.height):
+            row_str = ""
+            for x in range(self.width):
+                cell_value = self.grid[y, x]
+                
+                # Add room boundaries
+                if x % self.room_size == 0 and x > 0:
+                    # Check if there's a door at this vertical boundary
+                    has_door = any(dx == 1 and dy == 0 for dx, dy in self.doors.get((x-1, y), set()))
+                    row_str += "|" if not has_door else " "
+                
+                # Highlight current room with brackets
+                if (room_x1 <= x < room_x2 and room_y1 <= y < room_y2):
+                    row_str += f"[{chars.get(cell_value, '?')}]"
+                else:
+                    row_str += f" {chars.get(cell_value, '?')} "
+            
+            result.append(row_str)
+            
+            # Add horizontal room boundaries
+            if y < self.height - 1 and (y + 1) % self.room_size == 0:
+                boundary_line = ""
+                for x in range(self.width):
+                    if x % self.room_size == 0 and x > 0:
+                        boundary_line += "+"
+                    
+                    # Check if there's a door at this horizontal boundary
+                    has_door = any(dx == 0 and dy == 1 for dx, dy in self.doors.get((x, y), set()))
+                    boundary_line += "---" if not has_door else "   "
+                
+                result.append(boundary_line)
+        
+        result.append("")
+        result.append("-" * 60)
+        result.append("Legend: A=Agent, K=Key, T=Treasure, X=Obstacle, F=Food, W=Weapon, ·=Empty")
+        result.append(f"Position: ({self.agent_pos[0]}, {self.agent_pos[1]})")
+        result.append(f"Current Room Objects: {len(self.get_room_objects(current_room))}")
+        result.append("-" * 60)
+        
+        return "\n".join(result)
+    
     def render(self, mode='human'):
-        """Render the environment with letters"""
+        """Render the environment"""
+        if mode == 'ansi':
+            return self._render_ascii()
+        
+        # Original image rendering for 'human' and 'rgb_array' modes (no emojis)
         fig, ax = plt.subplots(figsize=(16, 16))
         
         # Create color map for objects
@@ -340,6 +412,17 @@ class GridWorldEnv(gym.Env):
             ObjectType.WEAPON.value: 'red'
         }
         
+        # Letter mapping for image rendering
+        labels = {
+            ObjectType.EMPTY.value: '',
+            ObjectType.KEY.value: 'K',
+            ObjectType.TREASURE.value: 'T',
+            ObjectType.AGENT.value: 'A',
+            ObjectType.OBSTACLE.value: 'X',
+            ObjectType.FOOD.value: 'F',
+            ObjectType.WEAPON.value: 'W'
+        }
+        
         # Draw grid cells
         for y in range(self.height):
             for x in range(self.width):
@@ -349,25 +432,11 @@ class GridWorldEnv(gym.Env):
                                        facecolor=color, alpha=0.7)
                 ax.add_patch(rect)
                 
-                # Add object labels
-                if self.grid[y, x] == ObjectType.KEY.value:
-                    ax.text(x + 0.5, self.height - y - 0.5, 'K', 
-                           ha='center', va='center', fontweight='bold')
-                elif self.grid[y, x] == ObjectType.TREASURE.value:
-                    ax.text(x + 0.5, self.height - y - 0.5, 'T', 
-                           ha='center', va='center', fontweight='bold')
-                elif self.grid[y, x] == ObjectType.AGENT.value:
-                    ax.text(x + 0.5, self.height - y - 0.5, 'A', 
-                           ha='center', va='center', fontweight='bold')
-                elif self.grid[y, x] == ObjectType.OBSTACLE.value:
-                    ax.text(x + 0.5, self.height - y - 0.5, 'X', 
-                           ha='center', va='center', fontweight='bold')
-                elif self.grid[y, x] == ObjectType.FOOD.value:
-                    ax.text(x + 0.5, self.height - y - 0.5, 'F', 
-                           ha='center', va='center', fontweight='bold')
-                elif self.grid[y, x] == ObjectType.WEAPON.value:
-                    ax.text(x + 0.5, self.height - y - 0.5, 'W', 
-                           ha='center', va='center', fontweight='bold')
+                # Add letter labels
+                label = labels.get(self.grid[y, x], '')
+                if label:
+                    ax.text(x + 0.5, self.height - y - 0.5, label, 
+                           ha='center', va='center', fontweight='bold', fontsize=10)
         
         # Draw room boundaries
         for x in range(1, self.num_rooms_x):
@@ -484,15 +553,21 @@ if __name__ == "__main__":
     
     print(f"\nTotal objects in environment: {object_count}")
     
-    # Take some random actions
-    for i in range(100):
+    # Show initial configuration with image
+    print("\nInitial configuration (image):")
+    env.render(mode='human')
+    
+    # Show ASCII representation
+    print("\nASCII representation:")
+    print(env.render(mode='ansi'))
+    
+    # Take some random actions and show ASCII after each
+    for i in range(5):
         action = env.action_space.sample()
         obs, reward, done, info = env.step(action)
-        print(f"Step {i}: Action={action}, Reward={reward:.2f}, Room={info['current_room']}, Event={info['event']}")
+        print(f"\nStep {i}: Action={action}, Reward={reward:.2f}, Room={info['current_room']}, Event={info['event']}")
+        print(env.render(mode='ansi'))
         
         if done:
             print("Episode finished!")
             break
-    
-    # Render the final state
-    env.render()
