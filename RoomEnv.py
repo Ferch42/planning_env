@@ -18,7 +18,7 @@ class ObjectType(Enum):
 class GridWorldEnv(gym.Env):
     metadata = {'render.modes': ['human', 'rgb_array', 'ansi']}
     
-    def __init__(self, width=25, height=25, room_size=5, room_rows=5, room_cols=5):
+    def __init__(self, width=35, height=35, room_size=7, room_rows=5, room_cols=5):
         super(GridWorldEnv, self).__init__()
         
         self.room_size = room_size
@@ -30,15 +30,17 @@ class GridWorldEnv(gym.Env):
         self.num_rooms_x = room_cols
         self.num_rooms_y = room_rows
         
-        # Define action space: 0=up, 1=right, 2=down, 3=left
-        self.action_space = spaces.Discrete(4)
+        # Define action space: 0=up, 1=right, 2=down, 3=left, 4=pickup, 5=drop
+        self.action_space = spaces.Discrete(6)
         
-        # Observation space: grid of objects + agent position
+        # Observation space: grid of objects + agent position + inventory
         self.observation_space = spaces.Dict({
             'grid': spaces.Box(low=0, high=len(ObjectType)-1, 
                              shape=(self.height, self.width), dtype=np.int32),
             'agent_pos': spaces.Box(low=0, high=max(self.width, self.height), 
-                                  shape=(2,), dtype=np.int32)
+                                  shape=(2,), dtype=np.int32),
+            'inventory': spaces.Box(low=0, high=len(ObjectType)-1, 
+                                  shape=(1,), dtype=np.int32)
         })
         
         # Initialize environment state
@@ -48,6 +50,8 @@ class GridWorldEnv(gym.Env):
         self.objects = []  # List of (room_id, x, y, object_type)
         self.doors = defaultdict(set)  # Maps (x,y) to set of allowed directions
         self.door_positions = set()  # Store door positions for rendering
+        self.door_cells = set()  # Cells adjacent to doors
+        self.inventory = ObjectType.EMPTY  # What the agent is carrying
         
         self.reset()
         
@@ -68,22 +72,28 @@ class GridWorldEnv(gym.Env):
         y_end = min((room_y + 1) * self.room_size, self.height)
         return x_start, y_start, x_end, y_end
     
-    def _get_random_empty_position_in_room(self, room_id):
-        """Get a random empty position within a room"""
+    def _get_random_empty_position_in_room(self, room_id, avoid_door_areas=True):
+        """Get a random empty position within a room, avoiding door areas"""
         x_start, y_start, x_end, y_end = self._get_room_bounds(room_id)
         
         # Try to find an empty position
+        for _ in range(200):  # Increased attempts for larger rooms
+            x = np.random.randint(x_start, x_end)
+            y = np.random.randint(y_start, y_end)
+            
+            # Skip if this is a door cell and we're avoiding door areas
+            if avoid_door_areas and (x, y) in self.door_cells:
+                continue
+                
+            if self.grid[y, x] == ObjectType.EMPTY.value:
+                return x, y
+        
+        # If no empty spot found, try without door avoidance
         for _ in range(100):
             x = np.random.randint(x_start, x_end)
             y = np.random.randint(y_start, y_end)
             if self.grid[y, x] == ObjectType.EMPTY.value:
                 return x, y
-        
-        # If no empty spot found, return any non-occupied position
-        for x in range(x_start, x_end):
-            for y in range(y_start, y_end):
-                if self.grid[y, x] == ObjectType.EMPTY.value:
-                    return x, y
         
         # Last resort: center of room
         return (x_start + x_end) // 2, (y_start + y_end) // 2
@@ -137,6 +147,7 @@ class GridWorldEnv(gym.Env):
         """Place doors to ensure all rooms are reachable with limited connections"""
         self.doors.clear()
         self.door_positions.clear()
+        self.door_cells.clear()
         
         # First, create minimal connections to ensure all rooms are reachable
         connections = self._create_minimal_connections()
@@ -154,6 +165,10 @@ class GridWorldEnv(gym.Env):
                 self.door_positions.add((x-1, y, 1, 0))
                 self.door_positions.add((x, y, -1, 0))
                 
+                # Mark door cells (cells adjacent to doors)
+                self.door_cells.add((x-1, y))
+                self.door_cells.add((x, y))
+                
             elif dx == -1:  # Left connection
                 # Choose a random vertical position for the door
                 y = np.random.randint(current_y * self.room_size, (current_y + 1) * self.room_size)
@@ -164,6 +179,10 @@ class GridWorldEnv(gym.Env):
                 self.doors[(x, y)].add((-1, 0))   # Left direction
                 self.door_positions.add((x-1, y, 1, 0))
                 self.door_positions.add((x, y, -1, 0))
+                
+                # Mark door cells
+                self.door_cells.add((x-1, y))
+                self.door_cells.add((x, y))
                 
             elif dy == 1:  # Down connection
                 # Choose a random horizontal position for the door
@@ -176,6 +195,10 @@ class GridWorldEnv(gym.Env):
                 self.door_positions.add((x, y-1, 0, 1))
                 self.door_positions.add((x, y, 0, -1))
                 
+                # Mark door cells
+                self.door_cells.add((x, y-1))
+                self.door_cells.add((x, y))
+                
             elif dy == -1:  # Up connection
                 # Choose a random horizontal position for the door
                 x = np.random.randint(current_x * self.room_size, (current_x + 1) * self.room_size)
@@ -186,6 +209,10 @@ class GridWorldEnv(gym.Env):
                 self.doors[(x, y)].add((0, -1))   # Up direction
                 self.door_positions.add((x, y-1, 0, 1))
                 self.door_positions.add((x, y, 0, -1))
+                
+                # Mark door cells
+                self.door_cells.add((x, y-1))
+                self.door_cells.add((x, y))
         
         # Add a few extra random doors for variety, but not too many
         extra_doors = 0
@@ -212,6 +239,10 @@ class GridWorldEnv(gym.Env):
                         self.doors[(x, y)].add((-1, 0))   # Left direction
                         self.door_positions.add((x-1, y, 1, 0))
                         self.door_positions.add((x, y, -1, 0))
+                        
+                        # Mark door cells
+                        self.door_cells.add((x-1, y))
+                        self.door_cells.add((x, y))
                         extra_doors += 1
         
         # Place horizontal doors (between rooms vertically)
@@ -235,6 +266,10 @@ class GridWorldEnv(gym.Env):
                         self.doors[(x, y)].add((0, -1))   # Up direction
                         self.door_positions.add((x, y-1, 0, 1))
                         self.door_positions.add((x, y, 0, -1))
+                        
+                        # Mark door cells
+                        self.door_cells.add((x, y-1))
+                        self.door_cells.add((x, y))
                         extra_doors += 1
     
     def _is_door_between(self, from_pos, to_pos):
@@ -258,7 +293,7 @@ class GridWorldEnv(gym.Env):
                 }
     
     def _place_objects(self):
-        """Place objects randomly in different rooms - fewer objects"""
+        """Place objects randomly in different rooms - avoiding door areas"""
         self.objects = []
         
         # Place keys in random rooms (3 keys)
@@ -266,7 +301,7 @@ class GridWorldEnv(gym.Env):
             room_x = np.random.randint(0, self.num_rooms_x)
             room_y = np.random.randint(0, self.num_rooms_y)
             room_id = f"room_{room_x}_{room_y}"
-            key_x, key_y = self._get_random_empty_position_in_room(room_id)
+            key_x, key_y = self._get_random_empty_position_in_room(room_id, avoid_door_areas=True)
             self._add_object(room_id, key_x, key_y, ObjectType.KEY)
         
         # Place treasures in random rooms (2 treasures)
@@ -274,7 +309,7 @@ class GridWorldEnv(gym.Env):
             room_x = np.random.randint(0, self.num_rooms_x)
             room_y = np.random.randint(0, self.num_rooms_y)
             room_id = f"room_{room_x}_{room_y}"
-            treasure_x, treasure_y = self._get_random_empty_position_in_room(room_id)
+            treasure_x, treasure_y = self._get_random_empty_position_in_room(room_id, avoid_door_areas=True)
             self._add_object(room_id, treasure_x, treasure_y, ObjectType.TREASURE)
         
         # Place obstacles in random rooms (6 obstacles)
@@ -282,7 +317,7 @@ class GridWorldEnv(gym.Env):
             room_x = np.random.randint(0, self.num_rooms_x)
             room_y = np.random.randint(0, self.num_rooms_y)
             room_id = f"room_{room_x}_{room_y}"
-            obstacle_x, obstacle_y = self._get_random_empty_position_in_room(room_id)
+            obstacle_x, obstacle_y = self._get_random_empty_position_in_room(room_id, avoid_door_areas=True)
             self._add_object(room_id, obstacle_x, obstacle_y, ObjectType.OBSTACLE)
         
         # Place food in random rooms (4 food items)
@@ -290,7 +325,7 @@ class GridWorldEnv(gym.Env):
             room_x = np.random.randint(0, self.num_rooms_x)
             room_y = np.random.randint(0, self.num_rooms_y)
             room_id = f"room_{room_x}_{room_y}"
-            food_x, food_y = self._get_random_empty_position_in_room(room_id)
+            food_x, food_y = self._get_random_empty_position_in_room(room_id, avoid_door_areas=True)
             self._add_object(room_id, food_x, food_y, ObjectType.FOOD)
         
         # Place weapons in random rooms (2 weapons)
@@ -298,7 +333,7 @@ class GridWorldEnv(gym.Env):
             room_x = np.random.randint(0, self.num_rooms_x)
             room_y = np.random.randint(0, self.num_rooms_y)
             room_id = f"room_{room_x}_{room_y}"
-            weapon_x, weapon_y = self._get_random_empty_position_in_room(room_id)
+            weapon_x, weapon_y = self._get_random_empty_position_in_room(room_id, avoid_door_areas=True)
             self._add_object(room_id, weapon_x, weapon_y, ObjectType.WEAPON)
     
     def _add_object(self, room_id, x, y, obj_type):
@@ -324,9 +359,12 @@ class GridWorldEnv(gym.Env):
         
         # Place agent in a random empty position in the first room
         first_room_id = "room_0_0"
-        agent_x, agent_y = self._get_random_empty_position_in_room(first_room_id)
+        agent_x, agent_y = self._get_random_empty_position_in_room(first_room_id, avoid_door_areas=True)
         self.agent_pos = np.array([agent_x, agent_y], dtype=np.int32)
         self.grid[self.agent_pos[1], self.agent_pos[0]] = ObjectType.AGENT.value
+        
+        # Reset inventory
+        self.inventory = ObjectType.EMPTY
         
         return self._get_observation()
     
@@ -334,7 +372,8 @@ class GridWorldEnv(gym.Env):
         """Get current observation"""
         return {
             'grid': self.grid.copy(),
-            'agent_pos': self.agent_pos.copy()
+            'agent_pos': self.agent_pos.copy(),
+            'inventory': np.array([self.inventory.value], dtype=np.int32)
         }
     
     def _get_current_room(self):
@@ -368,42 +407,123 @@ class GridWorldEnv(gym.Env):
         done = False
         info = {
             'current_room': self._get_current_room(),
-            'event': 'moved'
+            'event': 'moved',
+            'inventory': self.inventory
         }
         
         # Save old position and room
         old_pos = self.agent_pos.copy()
         old_room = self._get_current_room()
         
-        # Calculate new position based on action
-        new_pos = self.agent_pos.copy()
-        if action == 0:  # up
-            new_pos[1] = max(0, new_pos[1] - 1)
-        elif action == 1:  # right
-            new_pos[0] = min(self.width - 1, new_pos[0] + 1)
-        elif action == 2:  # down
-            new_pos[1] = min(self.height - 1, new_pos[1] + 1)
-        elif action == 3:  # left
-            new_pos[0] = max(0, new_pos[0] - 1)
+        if action < 4:  # Movement actions
+            # Calculate new position based on action
+            new_pos = self.agent_pos.copy()
+            if action == 0:  # up
+                new_pos[1] = max(0, new_pos[1] - 1)
+            elif action == 1:  # right
+                new_pos[0] = min(self.width - 1, new_pos[0] + 1)
+            elif action == 2:  # down
+                new_pos[1] = min(self.height - 1, new_pos[1] + 1)
+            elif action == 3:  # left
+                new_pos[0] = max(0, new_pos[0] - 1)
+            
+            # Check if move is valid
+            if self._is_valid_move(self.agent_pos, new_pos):
+                # Update agent position
+                self.agent_pos = new_pos
+                
+                # Update grid - clear old position
+                self.grid[old_pos[1], old_pos[0]] = ObjectType.EMPTY.value
+                
+                # Check what's at the new position
+                current_cell = self.grid[self.agent_pos[1], self.agent_pos[0]]
+                
+                # Check if we changed rooms
+                new_room = self._get_current_room()
+                if old_room != new_room:
+                    info['event'] = 'changed_room'
+                    reward = 0.2  # Small reward for exploring new room
+                    print(f"Entered {new_room} from {old_room}")
+                
+                # Update agent position on grid
+                self.grid[self.agent_pos[1], self.agent_pos[0]] = ObjectType.AGENT.value
+                
+                reward = max(reward - 0.01, -0.01)  # Small penalty for each move
+            else:
+                # Invalid move (hit obstacle, wall, or no door)
+                reward = -0.1
+                if old_room != self._get_room_id(new_pos[0], new_pos[1]):
+                    info['event'] = 'blocked_door'
+                    print("Blocked: No door between rooms!")
+                else:
+                    info['event'] = 'blocked'
         
-        # Check if move is valid
-        if self._is_valid_move(self.agent_pos, new_pos):
-            # Update agent position
-            self.agent_pos = new_pos
-            
-            # Update grid - clear old position
-            self.grid[old_pos[1], old_pos[0]] = ObjectType.EMPTY.value
-            
-            # Check what's at the new position
+        elif action == 4:  # Pickup action
+            # Check if there's an object at the current position that can be picked up
             current_cell = self.grid[self.agent_pos[1], self.agent_pos[0]]
             
-            # Check if we changed rooms
-            new_room = self._get_current_room()
-            if old_room != new_room:
-                info['event'] = 'changed_room'
-                reward = 0.2  # Small reward for exploring new room
-                print(f"Entered {new_room} from {old_room}")
-            
+            if current_cell in [ObjectType.KEY.value, ObjectType.TREASURE.value, 
+                              ObjectType.FOOD.value, ObjectType.WEAPON.value]:
+                
+                if self.inventory == ObjectType.EMPTY:
+                    # Pick up the object
+                    obj_type = ObjectType(current_cell)
+                    self.inventory = obj_type
+                    
+                    # Remove object from grid
+                    self.grid[self.agent_pos[1], self.agent_pos[0]] = ObjectType.AGENT.value
+                    
+                    # Remove from objects list
+                    self.objects = [(room_id, x, y, obj) for room_id, x, y, obj in self.objects 
+                                  if not (x == self.agent_pos[0] and y == self.agent_pos[1])]
+                    
+                    # Remove from room objects
+                    current_room = self._get_current_room()
+                    self.rooms[current_room]['objects'] = [
+                        (x, y, obj) for x, y, obj in self.rooms[current_room]['objects']
+                        if not (x == self.agent_pos[0] and y == self.agent_pos[1])
+                    ]
+                    
+                    info['event'] = 'picked_up'
+                    reward = 0.5
+                    print(f"Picked up {obj_type.name.lower()}!")
+                else:
+                    info['event'] = 'inventory_full'
+                    reward = -0.1
+                    print("Inventory full! Drop current item first.")
+            else:
+                info['event'] = 'nothing_to_pickup'
+                reward = -0.05
+                print("Nothing to pickup here.")
+        
+        elif action == 5:  # Drop action
+            if self.inventory != ObjectType.EMPTY:
+                # Check if current cell is empty (except for agent)
+                if self.grid[self.agent_pos[1], self.agent_pos[0]] == ObjectType.AGENT.value:
+                    # Place object in current position
+                    self.grid[self.agent_pos[1], self.agent_pos[0]] = self.inventory.value
+                    
+                    # Add to objects list
+                    current_room = self._get_current_room()
+                    self.objects.append((current_room, self.agent_pos[0], self.agent_pos[1], self.inventory))
+                    self.rooms[current_room]['objects'].append((self.agent_pos[0], self.agent_pos[1], self.inventory))
+                    
+                    print(f"Dropped {self.inventory.name.lower()} in {current_room}!")
+                    self.inventory = ObjectType.EMPTY
+                    info['event'] = 'dropped'
+                    reward = 0.2
+                else:
+                    info['event'] = 'cell_occupied'
+                    reward = -0.1
+                    print("Cannot drop here - cell is occupied!")
+            else:
+                info['event'] = 'nothing_to_drop'
+                reward = -0.05
+                print("Nothing to drop!")
+        
+        # Check for rewards based on current cell (only if not holding the object)
+        current_cell = self.grid[self.agent_pos[1], self.agent_pos[0]]
+        if self.inventory == ObjectType.EMPTY:
             if current_cell == ObjectType.KEY.value:
                 reward = 2
                 info['event'] = 'found_key'
@@ -421,19 +541,6 @@ class GridWorldEnv(gym.Env):
                 reward = 1.5
                 info['event'] = 'found_weapon'
                 print("Found a weapon! +1.5 reward")
-            else:
-                reward = max(reward - 0.01, -0.01)  # Small penalty for each move
-            
-            # Update agent position on grid
-            self.grid[self.agent_pos[1], self.agent_pos[0]] = ObjectType.AGENT.value
-        else:
-            # Invalid move (hit obstacle, wall, or no door)
-            reward = -0.1
-            if old_room != self._get_room_id(new_pos[0], new_pos[1]):
-                info['event'] = 'blocked_door'
-                print("Blocked: No door between rooms!")
-            else:
-                info['event'] = 'blocked'
         
         return self._get_observation(), reward, done, info
     
@@ -454,8 +561,9 @@ class GridWorldEnv(gym.Env):
         
         # Header with room info
         result.append("=" * 60)
-        result.append(f"GridWorld - {self.room_rows}x{self.room_cols} Rooms")
+        result.append(f"GridWorld - {self.room_rows}x{self.room_cols} Rooms (Size: {self.room_size}x{self.room_size})")
         result.append(f"Current Room: {self._get_current_room()}")
+        result.append(f"Inventory: {self.inventory.name if self.inventory != ObjectType.EMPTY else 'Empty'}")
         result.append("=" * 60)
         result.append("")
         
@@ -501,6 +609,7 @@ class GridWorldEnv(gym.Env):
         result.append("Legend: A=Agent, K=Key, T=Treasure, X=Obstacle, F=Food, W=Weapon, ·=Empty")
         result.append(f"Position: ({self.agent_pos[0]}, {self.agent_pos[1]})")
         result.append(f"Current Room Objects: {len(self.get_room_objects(current_room))}")
+        result.append("Actions: 0=Up, 1=Right, 2=Down, 3=Left, 4=Pickup, 5=Drop")
         result.append("-" * 60)
         
         return "\n".join(result)
@@ -596,13 +705,17 @@ class GridWorldEnv(gym.Env):
             ax.text(center_x, center_y, room_id, ha='center', va='center', 
                    fontsize=6, color='red', alpha=0.7, weight='bold')
         
+        # Add inventory info to the plot
+        ax.text(0.5, self.height + 0.5, f"Inventory: {self.inventory.name if self.inventory != ObjectType.EMPTY else 'Empty'}", 
+               ha='left', va='center', fontsize=12, weight='bold', transform=ax.transData)
+        
         ax.set_xlim(0, self.width)
-        ax.set_ylim(0, self.height)
+        ax.set_ylim(0, self.height + 1)
         ax.set_aspect('equal')
         ax.set_xticks(np.arange(0, self.width + 1))
         ax.set_yticks(np.arange(0, self.height + 1))
         ax.grid(True, color='black', linewidth=0.5)
-        ax.set_title(f'GridWorld Environment - {self.room_rows}x{self.room_cols} Rooms (Minimal Connections)')
+        ax.set_title(f'GridWorld - {self.room_rows}x{self.room_cols} Rooms (Pickup/Drop Enabled)')
         
         if mode == 'human':
             plt.show()
@@ -660,8 +773,8 @@ class GridWorldEnv(gym.Env):
 
 # Example usage and testing
 if __name__ == "__main__":
-    # Create a 5x5 grid of rooms (25 total rooms)
-    env = GridWorldEnv(room_size=5, room_rows=5, room_cols=5)
+    # Create a 5x5 grid of rooms with larger rooms
+    env = GridWorldEnv(room_size=7, room_rows=5, room_cols=5)
     
     # Test the environment
     obs = env.reset()
@@ -693,9 +806,10 @@ if __name__ == "__main__":
     print("\nASCII representation:")
     print(env.render(mode='ansi'))
     
-    # Take some random actions and show ASCII after each
-    for i in range(5):
-        action = env.action_space.sample()
+    # Take some actions to demonstrate pickup/drop
+    actions = [1, 1, 1, 4, 2, 2, 5]  # Right, Right, Right, Pickup, Down, Down, Drop
+    
+    for i, action in enumerate(actions):
         obs, reward, done, info = env.step(action)
         print(f"\nStep {i}: Action={action}, Reward={reward:.2f}, Room={info['current_room']}, Event={info['event']}")
         print(env.render(mode='ansi'))
