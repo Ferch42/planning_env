@@ -18,7 +18,7 @@ class ObjectType(Enum):
 class GridWorldEnv(gym.Env):
     metadata = {'render.modes': ['human', 'rgb_array', 'ansi']}
     
-    def __init__(self, width=35, height=35, room_size=7, room_rows=5, room_cols=5):
+    def __init__(self, room_size=5, room_rows=4, room_cols=4):
         super(GridWorldEnv, self).__init__()
         
         self.room_size = room_size
@@ -774,7 +774,7 @@ class GridWorldEnv(gym.Env):
 # Example usage and testing
 if __name__ == "__main__":
     # Create a 5x5 grid of rooms with larger rooms
-    env = GridWorldEnv(room_size=7, room_rows=5, room_cols=5)
+    env = GridWorldEnv(room_size=5, room_rows=4, room_cols=4)
     
     # Test the environment
     obs = env.reset()
