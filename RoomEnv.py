@@ -33,14 +33,14 @@ class GridWorldEnv(gym.Env):
         # Define action space: 0=up, 1=right, 2=down, 3=left, 4=pickup, 5=drop
         self.action_space = spaces.Discrete(6)
         
-        # Observation space: grid of objects + agent position + inventory
+        # New observation space with predicate information
+        # We'll use a Dict space with string representations of predicates
         self.observation_space = spaces.Dict({
-            'grid': spaces.Box(low=0, high=len(ObjectType)-1, 
-                             shape=(self.height, self.width), dtype=np.int32),
             'agent_pos': spaces.Box(low=0, high=max(self.width, self.height), 
                                   shape=(2,), dtype=np.int32),
             'inventory': spaces.Box(low=0, high=len(ObjectType)-1, 
-                                  shape=(1,), dtype=np.int32)
+                                  shape=(1,), dtype=np.int32),
+            'predicates': spaces.Text(max_length=1000)  # String representation of predicates
         })
         
         # Initialize environment state
@@ -343,6 +343,29 @@ class GridWorldEnv(gym.Env):
             self.objects.append((room_id, x, y, obj_type))
             self.rooms[room_id]['objects'].append((x, y, obj_type))
     
+    def _get_predicates_for_room(self, room_id):
+        """Get predicate information for a specific room as first-order logic strings"""
+        # Get all objects in the room
+        room_objects = self.get_room_objects(room_id)
+        
+        # Create predicate strings
+        predicate_strings = []
+        
+        # Add AgentAt predicate
+        predicate_strings.append(f"AgentAt({room_id})")
+        
+        # Add At predicates for each object in the room
+        object_types_in_room = set()
+        for obj in room_objects:
+            obj_type = obj[2]
+            if obj_type != ObjectType.EMPTY and obj_type != ObjectType.AGENT:
+                object_types_in_room.add(obj_type)
+        
+        for obj_type in object_types_in_room:
+            predicate_strings.append(f"At({obj_type.name},{room_id})")
+        
+        return predicate_strings
+    
     def reset(self):
         """Reset the environment to initial state"""
         # Initialize empty grid
@@ -369,11 +392,19 @@ class GridWorldEnv(gym.Env):
         return self._get_observation()
     
     def _get_observation(self):
-        """Get current observation"""
+        """Get current observation with first-order predicate information"""
+        current_room = self._get_current_room()
+        
+        # Get predicate strings for current room
+        predicate_strings = self._get_predicates_for_room(current_room)
+        
+        # Join predicates into a single string
+        predicates_str = ";".join(predicate_strings)
+        
         return {
-            'grid': self.grid.copy(),
             'agent_pos': self.agent_pos.copy(),
-            'inventory': np.array([self.inventory.value], dtype=np.int32)
+            'inventory': np.array([self.inventory.value], dtype=np.int32),
+            'predicates': predicates_str
         }
     
     def _get_current_room(self):
@@ -560,11 +591,20 @@ class GridWorldEnv(gym.Env):
         result = []
         
         # Header with room info
-        result.append("=" * 60)
+        result.append("=" * 80)
         result.append(f"GridWorld - {self.room_rows}x{self.room_cols} Rooms (Size: {self.room_size}x{self.room_size})")
         result.append(f"Current Room: {self._get_current_room()}")
         result.append(f"Inventory: {self.inventory.name if self.inventory != ObjectType.EMPTY else 'Empty'}")
-        result.append("=" * 60)
+        
+        # Add predicate information
+        obs = self._get_observation()
+        predicates = obs['predicates'].split(';')
+        
+        result.append("Predicates:")
+        for pred in predicates:
+            result.append(f"  {pred}")
+        
+        result.append("=" * 80)
         result.append("")
         
         # Get current room bounds to highlight it
@@ -605,12 +645,12 @@ class GridWorldEnv(gym.Env):
                 result.append(boundary_line)
         
         result.append("")
-        result.append("-" * 60)
+        result.append("-" * 80)
         result.append("Legend: A=Agent, K=Key, T=Treasure, X=Obstacle, F=Food, W=Weapon, ·=Empty")
         result.append(f"Position: ({self.agent_pos[0]}, {self.agent_pos[1]})")
         result.append(f"Current Room Objects: {len(self.get_room_objects(current_room))}")
         result.append("Actions: 0=Up, 1=Right, 2=Down, 3=Left, 4=Pickup, 5=Drop")
-        result.append("-" * 60)
+        result.append("-" * 80)
         
         return "\n".join(result)
     
@@ -705,17 +745,26 @@ class GridWorldEnv(gym.Env):
             ax.text(center_x, center_y, room_id, ha='center', va='center', 
                    fontsize=6, color='red', alpha=0.7, weight='bold')
         
-        # Add inventory info to the plot
-        ax.text(0.5, self.height + 0.5, f"Inventory: {self.inventory.name if self.inventory != ObjectType.EMPTY else 'Empty'}", 
-               ha='left', va='center', fontsize=12, weight='bold', transform=ax.transData)
+        # Add inventory and predicate info to the plot
+        obs = self._get_observation()
+        predicates = obs['predicates'].split(';')
+        
+        info_text = f"Inventory: {self.inventory.name if self.inventory != ObjectType.EMPTY else 'Empty'}\n"
+        info_text += "Predicates:\n"
+        for pred in predicates:
+            info_text += f"  {pred}\n"
+        
+        ax.text(0.5, self.height + 3.0, info_text, 
+               ha='left', va='center', fontsize=10, weight='bold', transform=ax.transData,
+               bbox=dict(boxstyle="round,pad=0.3", facecolor="lightblue", alpha=0.7))
         
         ax.set_xlim(0, self.width)
-        ax.set_ylim(0, self.height + 1)
+        ax.set_ylim(0, self.height + 5)
         ax.set_aspect('equal')
         ax.set_xticks(np.arange(0, self.width + 1))
         ax.set_yticks(np.arange(0, self.height + 1))
         ax.grid(True, color='black', linewidth=0.5)
-        ax.set_title(f'GridWorld - {self.room_rows}x{self.room_cols} Rooms (Pickup/Drop Enabled)')
+        ax.set_title(f'GridWorld - {self.room_rows}x{self.room_cols} Rooms (First-Order Predicate Observations)')
         
         if mode == 'human':
             plt.show()
@@ -773,30 +822,21 @@ class GridWorldEnv(gym.Env):
 
 # Example usage and testing
 if __name__ == "__main__":
-    # Create a 5x5 grid of rooms with larger rooms
-    env = GridWorldEnv(room_size=5, room_rows=4, room_cols=4)
+    # Create a 3x3 grid of rooms
+    env = GridWorldEnv(room_size=5, room_rows=3, room_cols=3)
     
     # Test the environment
     obs = env.reset()
     print(f"Initial room: {env.get_agent_room()}")
-    print(f"Objects in initial room: {env.get_room_objects(env.get_agent_room())}")
+    
+    # Show the new observation structure
+    print("\nInitial observation:")
+    print(f"Agent position: {obs['agent_pos']}")
+    print(f"Inventory: {obs['inventory']}")
+    print(f"Predicates: {obs['predicates']}")
     
     # Check if all rooms are reachable
     print(f"\nAll rooms are reachable: {env.is_fully_connected()}")
-    
-    # Print room connections
-    print(f"\nRoom connections for {env.get_agent_room()}: {env.get_room_connections(env.get_agent_room())}")
-    
-    # Print all rooms and their objects
-    print("\nAll rooms and their objects:")
-    object_count = 0
-    for room_id, room_info in env.rooms.items():
-        objects = room_info['objects']
-        if objects:
-            print(f"{room_id}: {objects}")
-            object_count += len(objects)
-    
-    print(f"\nTotal objects in environment: {object_count}")
     
     # Show initial configuration with image
     print("\nInitial configuration (image):")
@@ -806,12 +846,15 @@ if __name__ == "__main__":
     print("\nASCII representation:")
     print(env.render(mode='ansi'))
     
-    # Take some actions to demonstrate pickup/drop
-    actions = [1, 1, 1, 4, 2, 2, 5]  # Right, Right, Right, Pickup, Down, Down, Drop
+    # Take some actions to demonstrate the new observation system
+    actions = [1, 1, 2, 4]  # Right, Right, Down, Pickup
     
     for i, action in enumerate(actions):
         obs, reward, done, info = env.step(action)
         print(f"\nStep {i}: Action={action}, Reward={reward:.2f}, Room={info['current_room']}, Event={info['event']}")
+        
+        # Show the new observation with predicates
+        print(f"Observation - Predicates: {obs['predicates']}")
         print(env.render(mode='ansi'))
         
         if done:
