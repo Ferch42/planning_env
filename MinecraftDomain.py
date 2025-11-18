@@ -92,28 +92,43 @@ class MinecraftAction:
         return f"{self.name:25} | {prereq_str:30} → {result_str}"
 
 class MinecraftPlanningDomain:
-    def __init__(self):
-        # Define locations first
-        self.locations = list(Location)
+    def __init__(self, available_locations: Set[Location] = None):
+        # Use provided locations or default to all locations
+        if available_locations is None:
+            available_locations = set(Location)
+        self.available_locations = available_locations
         self.location_connections = self._create_location_connections()
         self.actions = self._create_actions()
     
     def _create_location_connections(self) -> Dict[Location, List[Location]]:
-        """Define which locations are connected to each other"""
-        return {
+        """Define which locations are connected to each other, filtered by available locations"""
+        # Define all possible connections
+        all_connections = {
             Location.FOREST: [Location.MINE, Location.ORCHARD, Location.CRAFTING_TABLE, Location.VILLAGE],
             Location.MINE: [Location.FOREST, Location.CRAFTING_TABLE, Location.VILLAGE],
             Location.ORCHARD: [Location.FOREST, Location.CRAFTING_TABLE, Location.VILLAGE],
             Location.CRAFTING_TABLE: [Location.FOREST, Location.MINE, Location.ORCHARD, Location.VILLAGE],
             Location.VILLAGE: [Location.FOREST, Location.MINE, Location.ORCHARD, Location.CRAFTING_TABLE],
         }
+        
+        # Filter connections to only include available locations
+        filtered_connections = {}
+        for location, connected_locations in all_connections.items():
+            if location in self.available_locations:
+                # Only keep connections to locations that are available
+                filtered_connections[location] = [
+                    connected_loc for connected_loc in connected_locations 
+                    if connected_loc in self.available_locations
+                ]
+        
+        return filtered_connections
     
     def _create_actions(self) -> List[MinecraftAction]:
         actions = []
         
         # Movement actions 
-        for from_loc in self.locations:
-            for to_loc in self.locations:
+        for from_loc in self.available_locationscl:
+            for to_loc in self.available_locationscl:
                 if from_loc != to_loc:
                     actions.append(
                         MinecraftAction(
@@ -235,405 +250,231 @@ class MinecraftPlanningDomain:
         
         return None
 
-# Test the domain
-def test_basic_functionality():
-    """Test that the domain works without errors"""
-    print("=== Testing Basic Domain Functionality ===")
+
+import unittest
+from typing import Set, Dict, List
+
+class TestMinecraftPlanningDomain(unittest.TestCase):
     
-    try:
+    def test_default_constructor(self):
+        """Test that default constructor works and uses all locations"""
         domain = MinecraftPlanningDomain()
-        print("✅ Domain created successfully")
-        print(f"✅ Locations: {[loc.value for loc in domain.locations]}")
-        print(f"✅ Total actions: {len(domain.actions)}")
+        self.assertEqual(domain.available_locations, set(Location))
+        self.assertEqual(len(domain.location_connections), 5)  # All 5 locations should have connections
+    
+    def test_custom_locations_forest_mine_only(self):
+        """Test with only Forest and Mine available"""
+        available_locations = {Location.FOREST, Location.MINE}
+        domain = MinecraftPlanningDomain(available_locations)
         
-        # Test available actions from forest
-        actions = domain.get_available_actions({}, Location.FOREST)
-        print(f"✅ Available actions from Forest: {len(actions)}")
+        self.assertEqual(domain.available_locations, available_locations)
         
-        # Count by type
-        move_actions = [a for a in actions if a.action_type == ActionType.MOVE]
-        gather_actions = [a for a in actions if a.action_type == ActionType.GATHER]
+        # Check connections only include available locations
+        self.assertEqual(set(domain.location_connections.keys()), available_locations)
         
-        print(f"✅ Move actions: {len(move_actions)}")
-        print(f"✅ Gather actions: {len(gather_actions)}")
+        # Forest should only connect to Mine (other connections removed)
+        self.assertEqual(domain.location_connections[Location.FOREST], [Location.MINE])
         
-        return domain
+        # Mine should only connect to Forest
+        self.assertEqual(domain.location_connections[Location.MINE], [Location.FOREST])
+    
+    def test_custom_locations_no_village(self):
+        """Test world without village"""
+        available_locations = {Location.FOREST, Location.MINE, Location.ORCHARD, Location.CRAFTING_TABLE}
+        domain = MinecraftPlanningDomain(available_locations)
         
-    except Exception as e:
-        print(f"❌ Error: {e}")
-        return None
-
-def test_simple_paths(domain):
-    """Test finding simple paths"""
-    print("\n=== Testing Simple Paths ===")
-    
-    # Test 1: Wood Sword (should be simple: gather wood, move to crafting, craft)
-    print("\n🎯 Test 1: Path to Wood Sword")
-    path = domain.find_shortest_path(Location.FOREST, {Item.WOOD_SWORD: 1}, max_depth=10)
-    
-    if path:
-        print(f"✅ Success! {len(path)} steps:")
-        for i, action in enumerate(path, 1):
-            if action.action_type == ActionType.MOVE:
-                print(f"  {i:2}. 🚶 {action}")
-            else:
-                location_icon = {
-                    Location.FOREST: "🌲",
-                    Location.MINE: "⛏️", 
-                    Location.ORCHARD: "🍎",
-                    Location.CRAFTING_TABLE: "🛠️",
-                    Location.VILLAGE: "🏘️"
-                }.get(action.location, "📍")
-                print(f"  {i:2}. {location_icon} {action}")
-    else:
-        print("❌ Failed to find path to Wood Sword")
-    
-    # Test 2: Wood Pickaxe
-    print("\n🎯 Test 2: Path to Wood Pickaxe")
-    path = domain.find_shortest_path(Location.FOREST, {Item.WOOD_PICKAXE: 1}, max_depth=10)
-    
-    if path:
-        print(f"✅ Success! {len(path)} steps:")
-        for i, action in enumerate(path, 1):
-            if action.action_type == ActionType.MOVE:
-                print(f"  {i:2}. 🚶 {action}")
-            else:
-                location_icon = {
-                    Location.FOREST: "🌲",
-                    Location.MINE: "⛏️",
-                    Location.ORCHARD: "🍎",
-                    Location.CRAFTING_TABLE: "🛠️", 
-                    Location.VILLAGE: "🏘️"
-                }.get(action.location, "📍")
-                print(f"  {i:2}. {location_icon} {action}")
-    else:
-        print("❌ Failed to find path to Wood Pickaxe")
-
-def analyze_domain(domain):
-    """Analyze the domain structure"""
-    print("\n=== Domain Analysis ===")
-    
-    action_types = {}
-    for action in domain.actions:
-        action_types[action.action_type] = action_types.get(action.action_type, 0) + 1
-    
-    print("Action types:")
-    for action_type, count in action_types.items():
-        print(f"  {action_type.value}: {count}")
-    
-    print(f"\nLocations: {len(domain.locations)}")
-    for location in domain.locations:
-        actions_at_loc = [a for a in domain.actions if a.location == location and a.action_type != ActionType.MOVE]
-        print(f"  {location.value}: {len(actions_at_loc)} actions")
-
-def test_complex_paths(domain):
-    """Test more complex paths that require multiple steps and alternative routes"""
-    print("\n=== Testing Complex Paths ===")
-    
-    # Test 1: Iron Pickaxe via different methods
-    print("\n🎯 Test 1: Iron Pickaxe (Traditional Mining Path)")
-    path = domain.find_shortest_path(Location.FOREST, {Item.IRON_PICKAXE: 1}, max_depth=15)
-    
-    if path:
-        print(f"✅ Success! {len(path)} steps:")
-        for i, action in enumerate(path, 1):
-            if action.action_type == ActionType.MOVE:
-                print(f"  {i:2}. 🚶 {action}")
-            else:
-                location_icon = {
-                    Location.FOREST: "🌲",
-                    Location.MINE: "⛏️", 
-                    Location.ORCHARD: "🍎",
-                    Location.CRAFTING_TABLE: "🛠️",
-                    Location.VILLAGE: "🏘️"
-                }.get(action.location, "📍")
-                print(f"  {i:2}. {location_icon} {action}")
-    else:
-        print("❌ Failed to find traditional path to Iron Pickaxe")
-    
-    # Test 2: Diamond Sword (multiple possible paths)
-    print("\n🎯 Test 2: Diamond Sword")
-    path = domain.find_shortest_path(Location.FOREST, {Item.DIAMOND_SWORD: 1}, max_depth=20)
-    
-    if path:
-        print(f"✅ Success! {len(path)} steps:")
-        for i, action in enumerate(path, 1):
-            if action.action_type == ActionType.MOVE:
-                print(f"  {i:2}. 🚶 {action}")
-            else:
-                location_icon = {
-                    Location.FOREST: "🌲",
-                    Location.MINE: "⛏️",
-                    Location.ORCHARD: "🍎",
-                    Location.CRAFTING_TABLE: "🛠️",
-                    Location.VILLAGE: "🏘️"
-                }.get(action.location, "📍")
-                print(f"  {i:2}. {location_icon} {action}")
-    else:
-        print("❌ Failed to find path to Diamond Sword")
-    
-    # Test 3: Golden Apple (requires apple + gold)
-    print("\n🎯 Test 3: Golden Apple")
-    path = domain.find_shortest_path(Location.FOREST, {Item.GOLDEN_APPLE: 1}, max_depth=20)
-    
-    if path:
-        print(f"✅ Success! {len(path)} steps:")
-        for i, action in enumerate(path, 1):
-            if action.action_type == ActionType.MOVE:
-                print(f"  {i:2}. 🚶 {action}")
-            else:
-                location_icon = {
-                    Location.FOREST: "🌲",
-                    Location.MINE: "⛏️",
-                    Location.ORCHARD: "🍎",
-                    Location.CRAFTING_TABLE: "🛠️",
-                    Location.VILLAGE: "🏘️"
-                }.get(action.location, "📍")
-                print(f"  {i:2}. {location_icon} {action}")
-    else:
-        print("❌ Failed to find path to Golden Apple")
-
-def test_trading_paths(domain):
-    """Test paths that use trading mechanics"""
-    print("\n=== Testing Trading Paths ===")
-    
-    # Test 1: Iron Pickaxe via trading (should be shortest)
-    print("\n🎯 Test 1: Iron Pickaxe via Trading (Wood → Iron Pickaxe)")
-    path = domain.find_shortest_path(Location.FOREST, {Item.IRON_PICKAXE: 1}, max_depth=10)
-    
-    if path:
-        # Check if this uses the trading route
-        trading_used = any("trade_wood_for_iron_pick" in action.name for action in path)
-        print(f"✅ Path found with {len(path)} steps. Trading used: {trading_used}")
+        self.assertEqual(domain.available_locations, available_locations)
         
-        if trading_used:
-            print("🎉 Using optimal trading route!")
-            for i, action in enumerate(path, 1):
-                if action.action_type == ActionType.MOVE:
-                    print(f"  {i:2}. 🚶 {action}")
-                else:
-                    location_icon = {
-                        Location.FOREST: "🌲",
-                        Location.VILLAGE: "🏘️"
-                    }.get(action.location, "📍")
-                    print(f"  {i:2}. {location_icon} {action}")
-    
-    # Test 2: Enchanted Bow (requires string + lapis)
-    print("\n🎯 Test 2: Enchanted Bow")
-    path = domain.find_shortest_path(Location.FOREST, {Item.ENCHANTED_BOW: 1}, max_depth=25)
-    
-    if path:
-        print(f"✅ Success! {len(path)} steps:")
-        for i, action in enumerate(path, 1):
-            if action.action_type == ActionType.MOVE:
-                print(f"  {i:2}. 🚶 {action}")
-            else:
-                location_icon = {
-                    Location.FOREST: "🌲",
-                    Location.MINE: "⛏️",
-                    Location.ORCHARD: "🍎",
-                    Location.CRAFTING_TABLE: "🛠️",
-                    Location.VILLAGE: "🏘️"
-                }.get(action.location, "📍")
-                print(f"  {i:2}. {location_icon} {action}")
-    else:
-        print("❌ Failed to find path to Enchanted Bow")
-
-def test_meat_trading_path(domain):
-    """Test the meat trading path for diamonds"""
-    print("\n=== Testing Meat Trading Path ===")
-    
-    # Test: Get diamonds via meat trading (requires sword first)
-    print("\n🎯 Test: Diamonds via Meat Trading")
-    path = domain.find_shortest_path(Location.FOREST, {Item.DIAMONDS: 1}, max_depth=15)
-    
-    if path:
-        # Check if this uses the meat trading route
-        meat_trading_used = any("trade_meat_for_diamonds" in action.name for action in path)
-        hunting_used = any("hunt_meat" in action.name for action in path)
+        # Village should not be in connections
+        self.assertNotIn(Location.VILLAGE, domain.location_connections)
         
-        print(f"✅ Path found with {len(path)} steps.")
-        print(f"   Meat trading used: {meat_trading_used}")
-        print(f"   Hunting used: {hunting_used}")
+        # Check Forest connections (no village)
+        forest_connections = domain.location_connections[Location.FOREST]
+        self.assertIn(Location.MINE, forest_connections)
+        self.assertIn(Location.ORCHARD, forest_connections)
+        self.assertIn(Location.CRAFTING_TABLE, forest_connections)
+        self.assertNotIn(Location.VILLAGE, forest_connections)
+    
+    def test_custom_locations_trading_world(self):
+        """Test world with only Forest and Village (trading-focused)"""
+        available_locations = {Location.FOREST, Location.VILLAGE}
+        domain = MinecraftPlanningDomain(available_locations)
         
-        if meat_trading_used:
-            print("🎉 Using meat trading route for diamonds!")
-            for i, action in enumerate(path, 1):
-                if action.action_type == ActionType.MOVE:
-                    print(f"  {i:2}. 🚶 {action}")
-                else:
-                    location_icon = {
-                        Location.FOREST: "🌲",
-                        Location.VILLAGE: "🏘️"
-                    }.get(action.location, "📍")
-                    print(f"  {i:2}. {location_icon} {action}")
-
-def compare_path_efficiency(domain):
-    """Compare different paths to the same goal"""
-    print("\n=== Path Efficiency Comparison ===")
-    
-    goals = {
-        "Iron Pickaxe": {Item.IRON_PICKAXE: 1},
-        "Diamond Sword": {Item.DIAMOND_SWORD: 1},
-        "Golden Apple": {Item.GOLDEN_APPLE: 1},
-        "Enchanted Bow": {Item.ENCHANTED_BOW: 1}
-    }
-    
-    for goal_name, goal_items in goals.items():
-        print(f"\n📊 {goal_name}:")
-        path = domain.find_shortest_path(Location.FOREST, goal_items, max_depth=25)
+        self.assertEqual(domain.available_locations, available_locations)
         
-        if path:
-            # Count action types
-            action_counts = {}
-            for action in path:
-                action_type = action.action_type
-                action_counts[action_type] = action_counts.get(action_type, 0) + 1
-            
-            print(f"   Total steps: {len(path)}")
-            for action_type, count in action_counts.items():
-                print(f"   - {action_type.value}: {count}")
-            
-            # Check for specific strategies
-            if any("trade_" in action.name for action in path):
-                print("   💰 Uses trading")
-            if any("mine_" in action.name for action in path):
-                print("   ⛏️ Uses mining")
-            if any("craft_" in action.name for action in path):
-                print("   🛠️ Uses crafting")
-        else:
-            print(f"   ❌ No path found within depth limit")
+        # Both should connect to each other
+        self.assertEqual(domain.location_connections[Location.FOREST], [Location.VILLAGE])
+        self.assertEqual(domain.location_connections[Location.VILLAGE], [Location.FOREST])
+    
+    def test_custom_locations_single_location(self):
+        """Test with only one location available"""
+        available_locations = {Location.FOREST}
+        domain = MinecraftPlanningDomain(available_locations)
+        
+        self.assertEqual(domain.available_locations, available_locations)
+        
+        # Forest should have no connections (only location)
+        self.assertEqual(domain.location_connections[Location.FOREST], [])
+    
+    def test_empty_locations(self):
+        """Test with empty set of locations"""
+        available_locations = set()
+        domain = MinecraftPlanningDomain(available_locations)
+        
+        self.assertEqual(domain.available_locations, set())
+        self.assertEqual(domain.location_connections, {})
+    
+    def test_movement_actions_respect_available_locations(self):
+        """Test that movement actions are only created for available locations"""
+        available_locations = {Location.FOREST, Location.MINE}
+        domain = MinecraftPlanningDomain(available_locations)
+        
+        # Count movement actions - should only be between Forest and Mine
+        move_actions = [a for a in domain.actions if a.action_type == ActionType.MOVE]
+        
+        # Should have 2 movement actions: forest->mine and mine->forest
+        self.assertEqual(len(move_actions), 2)
+        
+        move_action_names = [a.name for a in move_actions]
+        self.assertIn("move_forest_to_mine", move_action_names)
+        self.assertIn("move_mine_to_forest", move_action_names)
+        
+        # Should NOT have actions to unavailable locations
+        unavailable_moves = [name for name in move_action_names 
+                           if "orchard" in name or "village" in name or "crafting_table" in name]
+        self.assertEqual(len(unavailable_moves), 0)
+    
+    def test_gathering_actions_respect_available_locations(self):
+        """Test that gathering actions are only created for available locations"""
+        available_locations = {Location.FOREST}  # Only forest, no mine
+        domain = MinecraftPlanningDomain(available_locations)
+        
+        # Should have forest gathering actions
+        forest_actions = [a for a in domain.actions 
+                         if a.location == Location.FOREST and a.action_type == ActionType.GATHER]
+        self.assertGreater(len(forest_actions), 0)
+        
+        # Should NOT have mine gathering actions
+        mine_actions = [a for a in domain.actions 
+                       if a.location == Location.MINE and a.action_type == ActionType.GATHER]
+        self.assertEqual(len(mine_actions), 0)
+    
+    def test_crafting_actions_only_with_crafting_table(self):
+        """Test that crafting actions are only available when crafting table exists"""
+        # Test without crafting table
+        domain_no_crafting = MinecraftPlanningDomain({Location.FOREST, Location.MINE})
+        crafting_actions = [a for a in domain_no_crafting.actions if a.action_type == ActionType.CRAFT]
+        self.assertEqual(len(crafting_actions), 0)
+        
+        # Test with crafting table
+        domain_with_crafting = MinecraftPlanningDomain({Location.FOREST, Location.CRAFTING_TABLE})
+        crafting_actions = [a for a in domain_with_crafting.actions if a.action_type == ActionType.CRAFT]
+        self.assertGreater(len(crafting_actions), 0)
+    
+    def test_trading_actions_only_with_village(self):
+        """Test that trading actions are only available when village exists"""
+        # Test without village
+        domain_no_village = MinecraftPlanningDomain({Location.FOREST, Location.MINE})
+        trading_actions = [a for a in domain_no_village.actions if a.action_type == ActionType.TRADE]
+        self.assertEqual(len(trading_actions), 0)
+        
+        # Test with village
+        domain_with_village = MinecraftPlanningDomain({Location.FOREST, Location.VILLAGE})
+        trading_actions = [a for a in domain_with_village.actions if a.action_type == ActionType.TRADE]
+        self.assertGreater(len(trading_actions), 0)
+    
+    def test_pathfinding_respects_available_locations(self):
+        """Test that pathfinding works correctly with limited locations"""
+        # World with only forest and crafting table
+        domain = MinecraftPlanningDomain({Location.FOREST, Location.CRAFTING_TABLE})
+        
+        # Should be able to make wood sword
+        path = domain.find_shortest_path(Location.FOREST, {Item.WOOD_SWORD: 1}, max_depth=10)
+        self.assertIsNotNone(path)
+        
+        # Should NOT be able to make iron pickaxe (no mine or village)
+        path = domain.find_shortest_path(Location.FOREST, {Item.IRON_PICKAXE: 1}, max_depth=10)
+        self.assertIsNone(path)
+    
+    def test_backward_compatibility(self):
+        """Test that original behavior is preserved when no locations are specified"""
+        domain_old = MinecraftPlanningDomain()  # No parameters
+        domain_new = MinecraftPlanningDomain(set(Location))  # Explicit all locations
+        
+        # Both should have the same available locations
+        self.assertEqual(domain_old.available_locations, domain_new.available_locations)
+        
+        # Both should have the same number of actions
+        self.assertEqual(len(domain_old.actions), len(domain_new.actions))
+        
+        # Both should find the same paths
+        path_old = domain_old.find_shortest_path(Location.FOREST, {Item.WOOD_SWORD: 1}, max_depth=10)
+        path_new = domain_new.find_shortest_path(Location.FOREST, {Item.WOOD_SWORD: 1}, max_depth=10)
+        self.assertEqual(len(path_old), len(path_new))
 
-
-
-def debug_meat_trading(domain):
-    """Why isn't meat trading being used? Let's find out."""
-    print("\n=== Debug: Meat Trading Analysis ===")
+def run_comprehensive_demonstration():
+    """Run a comprehensive demonstration of the new functionality"""
+    print("🧪 COMPREHENSIVE TEST DEMONSTRATION")
+    print("=" * 60)
     
-    # What does meat trading require?
-    print("Meat trading path requirements:")
-    print("1. Get a sword (wood: 3 steps, stone: 4 steps)")
-    print("2. Hunt meat (1 step)")
-    print("3. Trade meat for diamonds (1 step)")
-    print("Minimum: 5 steps for wood sword path")
-    
-    # Current diamond path length
-    diamond_path = domain.find_shortest_path(Location.FOREST, {Item.DIAMONDS: 1}, max_depth=15)
-    print(f"\nCurrent diamond path: {len(diamond_path)} steps")
-    
-    # Manual meat trading path
-    print("\nManual meat trading path attempt:")
-    manual_path = [
-        "gather_wood",  # 1
-        "move_forest_to_crafting_table",  # 2  
-        "craft_wood_sword",  # 3
-        "move_crafting_table_to_forest",  # 4
-        "hunt_meat",  # 5
-        "move_forest_to_village",  # 6
-        "trade_meat_for_diamonds",  # 7
-    ]
-    print(f"Meat trading path: {len(manual_path)} steps")
-    print("This explains why it's not optimal!")
-    
-    # Compare with current optimal
-    print(f"\nOptimal diamond path uses iron pickaxe mining: {len(diamond_path)} steps")
-
-def analyze_alternative_strategies(domain):
-    """What if we remove the optimal trading route?"""
-    print("\n=== Alternative Strategy Analysis ===")
-    
-    # Create a modified domain without the wood→iron_pick trade
-    class RestrictedDomain(MinecraftPlanningDomain):
-        def _create_actions(self):
-            actions = super()._create_actions()
-            # Remove the optimal trading route
-            actions = [a for a in actions if a.name != "trade_wood_for_iron_pick"]
-            return actions
-    
-    restricted_domain = RestrictedDomain()
-    
-    print("Without wood→iron_pick trade:")
-    
-    # Test iron pickaxe path
-    path = restricted_domain.find_shortest_path(Location.FOREST, {Item.IRON_PICKAXE: 1}, max_depth=15)
-    print(f"Iron Pickaxe: {len(path)} steps")
-    for i, action in enumerate(path, 1):
-        if action.action_type == ActionType.MOVE:
-            print(f"  {i:2}. 🚶 {action}")
-        else:
-            location_icon = {
-                Location.FOREST: "🌲", Location.MINE: "⛏️", Location.ORCHARD: "🍎",
-                Location.CRAFTING_TABLE: "🛠️", Location.VILLAGE: "🏘️"
-            }.get(action.location, "📍")
-            print(f"  {i:2}. {location_icon} {action}")
-    
-    # Test if meat trading becomes viable
-    diamond_path = restricted_domain.find_shortest_path(Location.FOREST, {Item.DIAMONDS: 1}, max_depth=15)
-    print(f"\nDiamonds: {len(diamond_path)} steps")
-    meat_used = any("meat" in action.name for action in diamond_path)
-    print(f"Meat trading used: {meat_used}")
-
-'''
-if __name__ == "__main__":
-    domain = MinecraftPlanningDomain()
-    
-    print("🔍 DEEP STRATEGY ANALYSIS")
-    print("=" * 50)
-    
-    debug_meat_trading(domain)
-    analyze_alternative_strategies(domain)
-    
-    print("\n" + "=" * 50)
-    print("🎯 FINAL STRATEGIC RECOMMENDATIONS")
-    print("=" * 50)
-    
-    recommendations = [
-        "1. 🏘️ PRIORITIZE VILLAGE ACCESS - Trading is overwhelmingly efficient",
-        "2. 📦 GATHER WOOD FIRST - Enables both tools and trading",
-        "3. 🔄 USE RESOURCE CHAINS - Stone→Lapis→Gold for golden apples", 
-        "4. ⛏️ SKIP WOOD TOOLS - Trade directly for iron tools",
-        "5. 🎯 BATCH LOCATION ACTIONS - Minimize movement between actions",
-        "6. 💎 DIAMONDS VIA MINING - More efficient than meat trading",
-        "7. 🏹 BOW VIA TRADING - String + stone trading is optimal",
-        "8. 🍎 GOLDEN APPLE LATE - Requires multiple resource types"
+    test_scenarios = [
+        {
+            "name": "Complete World",
+            "locations": set(Location),
+            "tests": ["All locations available", "Full connectivity", "All action types"]
+        },
+        {
+            "name": "No Village World", 
+            "locations": {Location.FOREST, Location.MINE, Location.ORCHARD, Location.CRAFTING_TABLE},
+            "tests": ["No trading", "Traditional crafting only", "No village connections"]
+        },
+        {
+            "name": "Forest Only",
+            "locations": {Location.FOREST},
+            "tests": ["Limited gathering", "No crafting/trading", "No movement options"]
+        },
+        {
+            "name": "Trading World",
+            "locations": {Location.FOREST, Location.VILLAGE},
+            "tests": ["Optimal trading", "No mining", "Quick tool acquisition"]
+        }
     ]
     
-    for rec in recommendations:
-        print(rec)
+    for scenario in test_scenarios:
+        print(f"\n🌍 {scenario['name']}")
+        print(f"   Locations: {[loc.value for loc in scenario['locations']]}")
+        print(f"   Tests: {', '.join(scenario['tests'])}")
+        
+        domain = MinecraftPlanningDomain(scenario['locations'])
+        
+        # Analyze the domain
+        action_types = {}
+        for action in domain.actions:
+            action_types[action.action_type] = action_types.get(action.action_type, 0) + 1
+        
+        print(f"   Action counts: {action_types}")
+        print(f"   Connections: {len(domain.location_connections)} locations connected")
+        
+        # Test basic functionality
+        goals_to_test = [
+            ("Wood Sword", {Item.WOOD_SWORD: 1}),
+            ("Iron Pickaxe", {Item.IRON_PICKAXE: 1}),
+        ]
+        
+        for goal_name, goal_items in goals_to_test:
+            path = domain.find_shortest_path(Location.FOREST, goal_items, max_depth=15)
+            if path:
+                print(f"   ✅ {goal_name}: {len(path)} steps")
+            else:
+                print(f"   ❌ {goal_name}: Not achievable")
 
-'''       
 if __name__ == "__main__":
-    domain = MinecraftPlanningDomain()
+    # Run the comprehensive demonstration
+    run_comprehensive_demonstration()
     
-    print("🎮 MINECRAFT PLANNING DOMAIN DEMONSTRATION")
-    print("=" * 50)
+    print("\n" + "=" * 60)
+    print("🧪 RUNNING UNIT TESTS")
+    print("=" * 60)
     
-    # Run all tests
-    test_simple_paths(domain)
-    test_complex_paths(domain)
-    test_trading_paths(domain)
-    test_meat_trading_path(domain)
-    compare_path_efficiency(domain)
-    
-    print("\n" + "=" * 50)
-    print("🏁 All tests completed!")
-    
-    # Final demonstration: Show the optimal path for each major goal
-    print("\n=== OPTIMAL PATHS TO ALL MAJOR GOALS ===")
-    
-    major_goals = {
-        "Wood Sword": {Item.WOOD_SWORD: 1},
-        "Stone Sword": {Item.STONE_SWORD: 1},
-        "Wood Pickaxe": {Item.WOOD_PICKAXE: 1},
-        "Iron Pickaxe": {Item.IRON_PICKAXE: 1},
-        "Diamond Sword": {Item.DIAMOND_SWORD: 1},
-        "Golden Apple": {Item.GOLDEN_APPLE: 1},
-        "Enchanted Bow": {Item.ENCHANTED_BOW: 1}
-    }
-    
-    for goal_name, goal_items in major_goals.items():
-        path = domain.find_shortest_path(Location.FOREST, goal_items, max_depth=30)
-        if path:
-            print(f"\n🎯 {goal_name}: {len(path)} steps")
-        else:
-            print(f"\n🎯 {goal_name}: ❌ No path found")
+    # Run the unit tests
+    unittest.main(argv=[''], verbosity=2, exit=False)
