@@ -82,12 +82,7 @@ class GridWorld:
                 center_x, center_y = room_centers[i]
                 self.grid[center_x, center_y] = obj_type
         
-        # Then, assign random objects to remaining rooms (80% chance)
-        for i in range(len(object_types), len(room_centers)):
-            if random.random() > 0.2:  # 80% chance for remaining rooms
-                center_x, center_y = room_centers[i]
-                obj_type = random.choice(object_types)
-                self.grid[center_x, center_y] = obj_type
+
     
     def _assign_room_ids(self):
         """Assign room IDs to all positions in the grid"""
@@ -265,7 +260,7 @@ def test_door_transitions():
     print(f"Found {len(door_trans)} door transitions")
     
     # Test a few door transitions
-    test_cases = door_trans[:4]  # Test first 4 door transitions
+    test_cases = door_trans[:10]  # Test first 4 door transitions
     
     for i, trans in enumerate(test_cases):
         print(f"\nTest {i+1}:")
@@ -390,19 +385,32 @@ def test_invalid_actions():
     
     # Test picking up object when not at table
     print("\nTest 2: Picking up object when not at table")
-    # Find a non-table position
-    non_table_pos = (1, 1)  # Should be a floor position
-    world.agent_pos = non_table_pos
-    world.agent_inventory = None
-    start_inventory = world.agent_inventory
+    # Find a non-table position that's not a wall
+    # Let's use a position that's definitely not a table (not in table_positions)
+    non_table_pos = None
+    for x in range(world.grid_size):
+        for y in range(world.grid_size):
+            if (x, y) not in world.table_positions and world.grid[x, y] != 1:  # Not a table and not a wall
+                non_table_pos = (x, y)
+                break
+        if non_table_pos:
+            break
     
-    # Try to pick up (should fail)
-    world.step(4)  # TOGGLE
-    
-    if world.agent_inventory == start_inventory:
-        print("  ✓ SUCCESS: Inventory unchanged when not at table")
+    if non_table_pos:
+        world.agent_pos = non_table_pos
+        world.agent_inventory = None
+        start_inventory = world.agent_inventory
+        print(f"  Start position: {world.agent_pos}, Inventory: {start_inventory}")
+        
+        # Try to pick up (should fail)
+        world.step(4)  # TOGGLE
+        
+        if world.agent_inventory == start_inventory:
+            print("  ✓ SUCCESS: Inventory unchanged when not at table")
+        else:
+            print(f"  ✗ FAILURE: Inventory changed to {world.agent_inventory}")
     else:
-        print(f"  ✗ FAILURE: Inventory changed to {world.agent_inventory}")
+        print("  ✗ SKIPPED: Could not find a non-table position")
 
 
 if __name__ == "__main__":
