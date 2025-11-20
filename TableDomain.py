@@ -8,15 +8,9 @@ class ObjectType(Enum):
     TREASURE = 2
     FOOD = 3
     TOOL = 4
-    WEAPON = 5
-    POTION = 6
-    BOOK = 7
-    CRYSTAL = 8
-    GEM = 9
-    COIN = 10
 
 class GridWorld:
-    def __init__(self, num_rooms=16, room_size=5):
+    def __init__(self, num_rooms=25, room_size=5):
         self.num_rooms = num_rooms
         self.room_size = room_size
         self.rooms_per_side = int(np.sqrt(num_rooms))
@@ -25,15 +19,16 @@ class GridWorld:
         self.grid_size = self.rooms_per_side * room_size + (self.rooms_per_side - 1)
         self.grid = np.zeros((self.grid_size, self.grid_size), dtype=int)
         
-        # Store table positions
+        # Store table positions and room IDs
         self.table_positions = {}
+        self.room_ids = {}  # Maps position to room ID
         
-        # Initialize agent at position (1,1)
-        self.agent_pos = (1, 1)
+        self.agent_pos = (0,0)
         self.agent_inventory = None
         
         self._build_rooms()
         self._assign_objects()
+        self._assign_room_ids()
     
     def _build_rooms(self):
         """Build interior walls between rooms"""
@@ -59,21 +54,42 @@ class GridWorld:
                 self.grid[door_row, wall_col] = 0
     
     def _assign_objects(self):
-        """Assign multiple object types to room centers"""
-        # Use all object types except EMPTY
+        """Assign objects to room centers - ensure at least one of each type"""
+        # Get all object types except EMPTY
         object_types = [obj.value for obj in ObjectType if obj != ObjectType.EMPTY]
         
+        # Get all room centers
+        room_centers = []
         for room_x in range(self.rooms_per_side):
             for room_y in range(self.rooms_per_side):
                 center_x = room_x * (self.room_size + 1) + self.room_size // 2
                 center_y = room_y * (self.room_size + 1) + self.room_size // 2
-                
                 self.table_positions[(center_x, center_y)] = (room_x, room_y)
-                
-                # 90% chance to have an object with random type
-                if random.random() > 0.1:
-                    obj_type = random.choice(object_types)
-                    self.grid[center_x, center_y] = obj_type
+                room_centers.append((center_x, center_y))
+        
+        # Shuffle room centers to assign objects randomly
+        random.shuffle(room_centers)
+        
+        # First, ensure at least one of each object type
+        for i, obj_type in enumerate(object_types):
+            if i < len(room_centers):
+                center_x, center_y = room_centers[i]
+                self.grid[center_x, center_y] = obj_type
+        
+    
+    def _assign_room_ids(self):
+        """Assign room IDs to all positions in the grid"""
+        for x in range(self.grid_size):
+            for y in range(self.grid_size):
+                # Calculate which room this position belongs to
+                room_x = x // (self.room_size + 1)
+                room_y = y // (self.room_size + 1)
+                room_id = room_x + room_y * self.rooms_per_side
+                self.room_ids[(x, y)] = room_id
+    
+    def get_current_room_id(self):
+        """Get the ID of the room the agent is currently in"""
+        return self.room_ids.get(self.agent_pos, -1)
     
     def step(self, action):
         """Execute an action (0=UP, 1=DOWN, 2=LEFT, 3=RIGHT, 4=TOGGLE)"""
@@ -105,31 +121,19 @@ class GridWorld:
                     self.agent_inventory = None
     
     def get_state(self):
-        """Return current grid state with agent position marked as -1"""
-        state = self.grid.copy()
+        """Return current state including grid, room ID, and inventory"""
+        grid_state = self.grid.copy()
         x, y = self.agent_pos
-        state[x, y] = -1  # Mark agent position
-        return state
+        grid_state[x, y] = -1  # Mark agent position
+        
+        return {
+            'grid': grid_state,
+            'room_id': self.get_current_room_id(),
+            'inventory': self.agent_inventory
+        }
     
     def render(self):
         """Display the current state"""
-        print(self.get_state())
-
-
-# Create environment with 25 rooms and multiple object types
-world = GridWorld(num_rooms=16, room_size=5)
-
-# Show initial state
-print("Initial state (25 rooms, multiple object types):")
-world.render()
-
-# Example actions
-actions = [3, 1, 4]  # RIGHT, DOWN, TOGGLE
-
-for i, action in enumerate(actions):
-    print(f"\nStep {i+1}, Action: {action}")
-    world.step(action)
-    world.render()
-    if world.agent_inventory:
-        obj_name = ObjectType(world.agent_inventory).name
-        print(f"Agent carrying: {obj_name} ({world.agent_inventory})")
+        state = self.get_state()
+        print(state['grid'])
+        print(f"Room ID: {state['room_id']}, Inventory: {state['inventory']}")
