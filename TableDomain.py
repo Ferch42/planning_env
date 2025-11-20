@@ -23,12 +23,18 @@ class GridWorld:
         self.table_positions = {}
         self.room_ids = {}  # Maps position to room ID
         
-        self.agent_pos = (0,0)
+        # Initialize agent at position (1,1)
+        self.agent_pos = (1, 1)
         self.agent_inventory = None
+        
+        # Precompute important transitions
+        self.door_transitions = []
+        self.object_transitions = []
         
         self._build_rooms()
         self._assign_objects()
         self._assign_room_ids()
+        self._precompute_transitions()
     
     def _build_rooms(self):
         """Build interior walls between rooms"""
@@ -87,6 +93,64 @@ class GridWorld:
                 room_id = room_x + room_y * self.rooms_per_side
                 self.room_ids[(x, y)] = room_id
     
+    def _precompute_transitions(self):
+        """Precompute all possible door and object transitions"""
+        # Precompute door transitions
+        door_pos = self.room_size // 2
+        
+        # Horizontal doors (vertical walls)
+        for i in range(1, self.rooms_per_side):
+            wall_row = i * (self.room_size + 1) - 1
+            for j in range(self.rooms_per_side):
+                door_col = j * (self.room_size + 1) + door_pos
+                
+                # From above the door to below the door (DOWN action)
+                self.door_transitions.append({
+                    'prev_position': (wall_row - 1, door_col),
+                    'action': 1,  # DOWN
+                    'next_position': (wall_row + 1, door_col),
+                    'type': 'door'
+                })
+                
+                # From below the door to above the door (UP action)
+                self.door_transitions.append({
+                    'prev_position': (wall_row + 1, door_col),
+                    'action': 0,  # UP
+                    'next_position': (wall_row - 1, door_col),
+                    'type': 'door'
+                })
+        
+        # Vertical doors (horizontal walls)
+        for i in range(1, self.rooms_per_side):
+            wall_col = i * (self.room_size + 1) - 1
+            for j in range(self.rooms_per_side):
+                door_row = j * (self.room_size + 1) + door_pos
+                
+                # From left of the door to right of the door (RIGHT action)
+                self.door_transitions.append({
+                    'prev_position': (door_row, wall_col - 1),
+                    'action': 3,  # RIGHT
+                    'next_position': (door_row, wall_col + 1),
+                    'type': 'door'
+                })
+                
+                # From right of the door to left of the door (LEFT action)
+                self.door_transitions.append({
+                    'prev_position': (door_row, wall_col + 1),
+                    'action': 2,  # LEFT
+                    'next_position': (door_row, wall_col - 1),
+                    'type': 'door'
+                })
+        
+        # Precompute object transitions (all table positions)
+        for table_pos in self.table_positions.keys():
+            self.object_transitions.append({
+                'prev_position': table_pos,
+                'action': 4,  # TOGGLE
+                'next_position': table_pos,
+                'type': 'object'
+            })
+    
     def get_current_room_id(self):
         """Get the ID of the room the agent is currently in"""
         return self.room_ids.get(self.agent_pos, -1)
@@ -119,6 +183,13 @@ class GridWorld:
                 if self.grid[self.agent_pos] == 0:
                     self.grid[self.agent_pos] = self.agent_inventory
                     self.agent_inventory = None
+    
+    def get_important_transitions(self):
+        """Get the precomputed important transitions"""
+        return {
+            'door_transitions': self.door_transitions,
+            'object_transitions': self.object_transitions
+        }
     
     def get_state(self):
         """Return current state including grid, room ID, and inventory"""
