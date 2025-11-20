@@ -82,7 +82,6 @@ class GridWorld:
                 center_x, center_y = room_centers[i]
                 self.grid[center_x, center_y] = obj_type
         
-
     
     def _assign_room_ids(self):
         """Assign room IDs to all positions in the grid"""
@@ -96,7 +95,7 @@ class GridWorld:
     
     def _precompute_transitions(self):
         """Precompute all possible door and object transitions"""
-        # Precompute door transitions - FIXED VERSION
+        # Precompute door transitions - Only transitions that change rooms
         door_pos = self.room_size // 2
         
         # Horizontal doors (vertical walls)
@@ -106,39 +105,51 @@ class GridWorld:
                 door_col = j * (self.room_size + 1) + door_pos
                 
                 # The door is at (wall_row, door_col)
-                # Moving through the door is a single step from one side to the other
+                # Moving through the door is a single step from one side to the door or from the door to the other side
                 
                 # From above the door to the door position (DOWN action)
-                self.door_transitions.append({
-                    'prev_position': (wall_row - 1, door_col),
-                    'action': 1,  # DOWN
-                    'next_position': (wall_row, door_col),
-                    'type': 'door'
-                })
+                prev_pos = (wall_row - 1, door_col)
+                next_pos = (wall_row, door_col)
+                if self.room_ids[prev_pos] != self.room_ids[next_pos]:
+                    self.door_transitions.append({
+                        'prev_position': prev_pos,
+                        'action': 1,  # DOWN
+                        'next_position': next_pos,
+                        'type': 'door'
+                    })
                 
                 # From the door position to below the door (DOWN action)
-                self.door_transitions.append({
-                    'prev_position': (wall_row, door_col),
-                    'action': 1,  # DOWN
-                    'next_position': (wall_row + 1, door_col),
-                    'type': 'door'
-                })
+                prev_pos = (wall_row, door_col)
+                next_pos = (wall_row + 1, door_col)
+                if self.room_ids[prev_pos] != self.room_ids[next_pos]:
+                    self.door_transitions.append({
+                        'prev_position': prev_pos,
+                        'action': 1,  # DOWN
+                        'next_position': next_pos,
+                        'type': 'door'
+                    })
                 
                 # From below the door to the door position (UP action)
-                self.door_transitions.append({
-                    'prev_position': (wall_row + 1, door_col),
-                    'action': 0,  # UP
-                    'next_position': (wall_row, door_col),
-                    'type': 'door'
-                })
+                prev_pos = (wall_row + 1, door_col)
+                next_pos = (wall_row, door_col)
+                if self.room_ids[prev_pos] != self.room_ids[next_pos]:
+                    self.door_transitions.append({
+                        'prev_position': prev_pos,
+                        'action': 0,  # UP
+                        'next_position': next_pos,
+                        'type': 'door'
+                    })
                 
                 # From the door position to above the door (UP action)
-                self.door_transitions.append({
-                    'prev_position': (wall_row, door_col),
-                    'action': 0,  # UP
-                    'next_position': (wall_row - 1, door_col),
-                    'type': 'door'
-                })
+                prev_pos = (wall_row, door_col)
+                next_pos = (wall_row - 1, door_col)
+                if self.room_ids[prev_pos] != self.room_ids[next_pos]:
+                    self.door_transitions.append({
+                        'prev_position': prev_pos,
+                        'action': 0,  # UP
+                        'next_position': next_pos,
+                        'type': 'door'
+                    })
         
         # Vertical doors (horizontal walls)
         for i in range(1, self.rooms_per_side):
@@ -147,36 +158,48 @@ class GridWorld:
                 door_row = j * (self.room_size + 1) + door_pos
                 
                 # From left of the door to the door position (RIGHT action)
-                self.door_transitions.append({
-                    'prev_position': (door_row, wall_col - 1),
-                    'action': 3,  # RIGHT
-                    'next_position': (door_row, wall_col),
-                    'type': 'door'
-                })
+                prev_pos = (door_row, wall_col - 1)
+                next_pos = (door_row, wall_col)
+                if self.room_ids[prev_pos] != self.room_ids[next_pos]:
+                    self.door_transitions.append({
+                        'prev_position': prev_pos,
+                        'action': 3,  # RIGHT
+                        'next_position': next_pos,
+                        'type': 'door'
+                    })
                 
                 # From the door position to right of the door (RIGHT action)
-                self.door_transitions.append({
-                    'prev_position': (door_row, wall_col),
-                    'action': 3,  # RIGHT
-                    'next_position': (door_row, wall_col + 1),
-                    'type': 'door'
-                })
+                prev_pos = (door_row, wall_col)
+                next_pos = (door_row, wall_col + 1)
+                if self.room_ids[prev_pos] != self.room_ids[next_pos]:
+                    self.door_transitions.append({
+                        'prev_position': prev_pos,
+                        'action': 3,  # RIGHT
+                        'next_position': next_pos,
+                        'type': 'door'
+                    })
                 
                 # From right of the door to the door position (LEFT action)
-                self.door_transitions.append({
-                    'prev_position': (door_row, wall_col + 1),
-                    'action': 2,  # LEFT
-                    'next_position': (door_row, wall_col),
-                    'type': 'door'
-                })
+                prev_pos = (door_row, wall_col + 1)
+                next_pos = (door_row, wall_col)
+                if self.room_ids[prev_pos] != self.room_ids[next_pos]:
+                    self.door_transitions.append({
+                        'prev_position': prev_pos,
+                        'action': 2,  # LEFT
+                        'next_position': next_pos,
+                        'type': 'door'
+                    })
                 
                 # From the door position to left of the door (LEFT action)
-                self.door_transitions.append({
-                    'prev_position': (door_row, wall_col),
-                    'action': 2,  # LEFT
-                    'next_position': (door_row, wall_col - 1),
-                    'type': 'door'
-                })
+                prev_pos = (door_row, wall_col)
+                next_pos = (door_row, wall_col - 1)
+                if self.room_ids[prev_pos] != self.room_ids[next_pos]:
+                    self.door_transitions.append({
+                        'prev_position': prev_pos,
+                        'action': 2,  # LEFT
+                        'next_position': next_pos,
+                        'type': 'door'
+                    })
         
         # Precompute object transitions (all table positions)
         for table_pos in self.table_positions.keys():
