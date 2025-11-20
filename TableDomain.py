@@ -269,190 +269,215 @@ class GridWorld:
         print(f"Room ID: {state['room_id']}, Inventory: {state['inventory']}")
 
 
-def test_door_transitions():
-    """Test that door transitions correctly move the agent between rooms"""
-    print("=== Testing Door Transitions ===")
-    
-    # Create a smaller grid for easier testing
-    world = GridWorld(num_rooms=4, room_size=3)
-    
-    # Get door transitions
-    transitions = world.get_important_transitions()
-    door_trans = transitions['door_transitions']
-    
-    print(f"Found {len(door_trans)} door transitions")
-    
-    # Test a few door transitions
-    test_cases = door_trans[:10]  # Test first 4 door transitions
-    
-    for i, trans in enumerate(test_cases):
-        print(f"\nTest {i+1}:")
-        print(f"  Transition: {trans['prev_position']} -> {trans['next_position']} via action {trans['action']}")
+class Agent:
+    def __init__(self, grid_world):
+        self.grid_world = grid_world
+        self.knowledge_base = {
+            'known_rooms': set(),  # Room IDs the agent has visited
+            'room_connections': set(),  # Tuples (room1, room2) for connected rooms
+            'object_locations': {},  # Maps object_id to room_id where it was found
+            'current_room': None,
+            'previous_room': None  # Track previous room to detect connections
+        }
         
-        # Set agent to starting position
-        world.agent_pos = trans['prev_position']
-        start_room = world.get_current_room_id()
-        print(f"  Start position: {world.agent_pos}, Room: {start_room}")
+        # Initialize with starting room knowledge
+        self._update_knowledge()
+    
+    def _update_knowledge(self):
+        """Update knowledge based on current state"""
+        state = self.grid_world.get_state()
+        current_room = state['room_id']
         
+        # Update room tracking
+        self.knowledge_base['previous_room'] = self.knowledge_base['current_room']
+        self.knowledge_base['current_room'] = current_room
+        
+        # Mark current room as known
+        self.knowledge_base['known_rooms'].add(current_room)
+        
+        # Detect and record room connections
+        if (self.knowledge_base['previous_room'] is not None and 
+            self.knowledge_base['previous_room'] != current_room):
+            
+            # Add bidirectional connection
+            room1 = self.knowledge_base['previous_room']
+            room2 = current_room
+            connection = tuple(sorted([room1, room2]))  # Sort to avoid duplicates like (0,1) and (1,0)
+            self.knowledge_base['room_connections'].add(connection)
+        
+        # If agent has an object in inventory, record its location
+        if state['inventory'] is not None:
+            obj_id = state['inventory']
+            self.knowledge_base['object_locations'][obj_id] = current_room
+    
+    def step(self, action):
+        """Take an action and update knowledge"""
         # Execute the action
-        world.step(trans['action'])
-        end_room = world.get_current_room_id()
-        print(f"  End position: {world.agent_pos}, Room: {end_room}")
+        self.grid_world.step(action)
         
-        # Verify the transition worked
-        expected_pos = trans['next_position']
-        if world.agent_pos == expected_pos:
-            print("  ✓ SUCCESS: Agent moved to expected position")
-        else:
-            print(f"  ✗ FAILURE: Expected {expected_pos}, got {world.agent_pos}")
-        
-        if start_room != end_room:
-            print("  ✓ SUCCESS: Agent changed rooms")
-        else:
-            # Check if this was supposed to be a room change
-            prev_room = world.room_ids[trans['prev_position']]
-            next_room = world.room_ids[trans['next_position']]
-            if prev_room != next_room:
-                print("  ✗ FAILURE: Agent should have changed rooms but didn't")
-            else:
-                print("  ✓ SUCCESS: No room change expected")
-
-
-def test_object_transitions():
-    """Test that object transitions correctly pick up and put down objects"""
-    print("\n=== Testing Object Transitions ===")
+        # Update knowledge after action
+        self._update_knowledge()
     
-    # Create a smaller grid for easier testing
+    def get_knowledge(self):
+        """Return the current knowledge base"""
+        return self.knowledge_base.copy()
+    
+    def knows_room(self, room_id):
+        """Check if agent knows about a room"""
+        return room_id in self.knowledge_base['known_rooms']
+    
+    def knows_connection(self, room1, room2):
+        """Check if agent knows two rooms are connected"""
+        connection = tuple(sorted([room1, room2]))
+        return connection in self.knowledge_base['room_connections']
+    
+    def knows_object_location(self, obj_id):
+        """Check if agent knows where an object is located"""
+        return obj_id in self.knowledge_base['object_locations']
+    
+    def get_known_objects(self):
+        """Get all objects whose locations are known"""
+        return list(self.knowledge_base['object_locations'].keys())
+    
+    def get_connected_rooms(self, room_id):
+        """Get all rooms known to be connected to a given room"""
+        connected = set()
+        for conn in self.knowledge_base['room_connections']:
+            if room_id in conn:
+                other_room = conn[0] if conn[1] == room_id else conn[1]
+                connected.add(other_room)
+        return connected
+    
+    def get_known_connectivity_graph(self):
+        """Return the complete connectivity graph as a dictionary"""
+        graph = {}
+        for room in self.knowledge_base['known_rooms']:
+            graph[room] = self.get_connected_rooms(room)
+        return graph
+    
+    def render_knowledge(self):
+        """Display the agent's current knowledge"""
+        kb = self.knowledge_base
+        
+        print("=== Agent Knowledge Base ===")
+        print(f"Current Room: {kb['current_room']}")
+        print(f"Previous Room: {kb['previous_room']}")
+        print(f"Known Rooms: {sorted(kb['known_rooms'])}")
+        
+        print("\nRoom Connections:")
+        if kb['room_connections']:
+            for conn in sorted(kb['room_connections']):
+                print(f"  Room {conn[0]} ↔ Room {conn[1]}")
+        else:
+            print("  No connections discovered yet")
+        
+        print("\nConnectivity Graph:")
+        graph = self.get_known_connectivity_graph()
+        for room, connected in sorted(graph.items()):
+            print(f"  Room {room} → {sorted(connected)}")
+        
+        print("\nObject Locations:")
+        if kb['object_locations']:
+            for obj_id, room_id in kb['object_locations'].items():
+                obj_name = ObjectType(obj_id).name
+                print(f"  {obj_name} is in Room {room_id}")
+        else:
+            print("  No object locations known")
+
+
+# Enhanced testing function
+def test_agent_connectivity():
+    print("=== Testing Agent Room Connectivity ===")
+    
+    # Create environment and agent
     world = GridWorld(num_rooms=4, room_size=3)
+    agent = Agent(world)
     
-    # Get object transitions
-    transitions = world.get_important_transitions()
-    object_trans = transitions['object_transitions']
+    print("Initial knowledge:")
+    agent.render_knowledge()
     
-    print(f"Found {len(object_trans)} object transitions")
+    # Test moving through multiple rooms to build connectivity
+    print("\n--- Exploring to build connectivity ---")
     
-    # Test picking up an object
-    print("\nTest 1: Picking up an object")
-    # Find a table with an object
-    table_with_object = None
-    for table_pos in world.table_positions.keys():
-        if world.grid[table_pos] >= 2:  # Has an object
-            table_with_object = table_pos
-            break
+    # Move through a path that connects multiple rooms
+    # This sequence should move through rooms 0, 1, 3, 2
+    actions = [
+        1,  # DOWN to door
+        1,  # DOWN through door to room 1
+        3,  # RIGHT
+        3,  # RIGHT  
+        1,  # DOWN to door
+        1,  # DOWN through door to room 3
+        2,  # LEFT
+        2,  # LEFT
+        0,  # UP to door
+        0,  # UP through door to room 2
+    ]
     
-    if table_with_object:
-        print(f"  Testing with table at {table_with_object} with object {world.grid[table_with_object]}")
+    for i, action in enumerate(actions):
+        print(f"\nStep {i+1}: Action {['UP', 'DOWN', 'LEFT', 'RIGHT', 'TOGGLE'][action]}")
+        agent.step(action)
         
-        # Set agent to table position
-        world.agent_pos = table_with_object
-        world.agent_inventory = None
+        # Show minimal state
+        state = world.get_state()
+        print(f"Position: {world.agent_pos}, Room: {state['room_id']}, Inventory: {state['inventory']}")
         
-        # Execute toggle action
-        world.step(4)  # TOGGLE action
-        
-        # Check if object was picked up
-        if world.agent_inventory is not None and world.grid[table_with_object] == 0:
-            print(f"  ✓ SUCCESS: Object {world.agent_inventory} picked up from table")
-        else:
-            print(f"  ✗ FAILURE: Object not picked up. Inventory: {world.agent_inventory}, Table: {world.grid[table_with_object]}")
-    else:
-        print("  ✗ SKIPPED: No table with object found")
+        # Show connectivity progress every few steps
+        if (i + 1) % 3 == 0 or i == len(actions) - 1:
+            print("Current connectivity:")
+            kb = agent.get_knowledge()
+            for conn in sorted(kb['room_connections']):
+                print(f"  Room {conn[0]} ↔ Room {conn[1]}")
     
-    # Test putting down an object
-    print("\nTest 2: Putting down an object")
-    # Find an empty table
-    empty_table = None
-    for table_pos in world.table_positions.keys():
-        if world.grid[table_pos] == 0:  # Empty table
-            empty_table = table_pos
-            break
+    print("\nFinal knowledge state:")
+    agent.render_knowledge()
     
-    if empty_table and world.agent_inventory is not None:
-        print(f"  Testing with empty table at {empty_table}, agent has object {world.agent_inventory}")
-        
-        # Set agent to empty table position
-        world.agent_pos = empty_table
-        
-        # Execute toggle action
-        world.step(4)  # TOGGLE action
-        
-        # Check if object was put down
-        if world.agent_inventory is None and world.grid[empty_table] >= 2:
-            print(f"  ✓ SUCCESS: Object {world.grid[empty_table]} put down on table")
-        else:
-            print(f"  ✗ FAILURE: Object not put down. Inventory: {world.agent_inventory}, Table: {world.grid[empty_table]}")
-    else:
-        print("  ✗ SKIPPED: No empty table found or agent has no object")
+    # Test knowledge queries
+    print("\n--- Testing Knowledge Queries ---")
+    print(f"Knows room 0: {agent.knows_room(0)}")
+    print(f"Knows room 4: {agent.knows_room(4)}")  # Should be False
+    print(f"Knows connection between 0 and 1: {agent.knows_connection(0, 1)}")
+    print(f"Rooms connected to 1: {sorted(agent.get_connected_rooms(1))}")
 
 
-def test_invalid_actions():
-    """Test that invalid actions don't change the agent's state"""
-    print("\n=== Testing Invalid Actions ===")
+def interactive_agent_demo():
+    """Interactive demo showing agent learning about environment"""
+    print("\n=== Interactive Agent Demo ===")
     
-    world = GridWorld(num_rooms=4, room_size=3)
+    world = GridWorld(num_rooms=9, room_size=3)  # 3x3 rooms for more interesting exploration
+    agent = Agent(world)
     
-    # Test moving into a wall
-    print("Test 1: Moving into a wall")
-    # Find a wall position next to the agent
-    world.agent_pos = (0, 1)  # Top row
-    start_pos = world.agent_pos
-    print(f"  Start position: {start_pos}")
+    print("Agent starts with no knowledge of the world!")
+    agent.render_knowledge()
     
-    # Try to move up (should fail)
-    world.step(0)  # UP
+    # Simple manual control
+    action_names = ["UP", "DOWN", "LEFT", "RIGHT", "TOGGLE"]
     
-    if world.agent_pos == start_pos:
-        print("  ✓ SUCCESS: Agent did not move into wall")
-    else:
-        print(f"  ✗ FAILURE: Agent moved to {world.agent_pos}")
-    
-    # Test picking up object when not at table
-    print("\nTest 2: Picking up object when not at table")
-    # Find a non-table position that's not a wall
-    # Let's use a position that's definitely not a table (not in table_positions)
-    non_table_pos = None
-    for x in range(world.grid_size):
-        for y in range(world.grid_size):
-            if (x, y) not in world.table_positions and world.grid[x, y] != 1:  # Not a table and not a wall
-                non_table_pos = (x, y)
+    while True:
+        print("\n" + "="*50)
+        world.render()
+        agent.render_knowledge()
+        
+        print("\nAvailable actions: 0=UP, 1=DOWN, 2=LEFT, 3=RIGHT, 4=TOGGLE, 5=QUIT")
+        try:
+            action = int(input("Enter action: "))
+            if action == 5:
                 break
-        if non_table_pos:
+            if action < 0 or action > 4:
+                print("Invalid action!")
+                continue
+                
+            print(f"\nExecuting: {action_names[action]}")
+            agent.step(action)
+            
+        except ValueError:
+            print("Please enter a number!")
+        except KeyboardInterrupt:
             break
-    
-    if non_table_pos:
-        world.agent_pos = non_table_pos
-        world.agent_inventory = None
-        start_inventory = world.agent_inventory
-        print(f"  Start position: {world.agent_pos}, Inventory: {start_inventory}")
-        
-        # Try to pick up (should fail)
-        world.step(4)  # TOGGLE
-        
-        if world.agent_inventory == start_inventory:
-            print("  ✓ SUCCESS: Inventory unchanged when not at table")
-        else:
-            print(f"  ✗ FAILURE: Inventory changed to {world.agent_inventory}")
-    else:
-        print("  ✗ SKIPPED: Could not find a non-table position")
 
 
 if __name__ == "__main__":
-    # Run all tests
-    test_door_transitions()
-    test_object_transitions()
-    test_invalid_actions()
-    
-    # Show final state of the test world
-    print("\n=== Final Test World State ===")
-    world = GridWorld(num_rooms=4, room_size=3)
-    world.render()
-    
-    # Show some precomputed transitions
-    transitions = world.get_important_transitions()
-    print(f"\nSample Door Transitions:")
-    for trans in transitions['door_transitions'][:3]:
-        print(f"  {trans}")
-    
-    print(f"\nSample Object Transitions:")
-    for trans in transitions['object_transitions'][:3]:
-        print(f"  {trans}")
+    # Add these to your existing main section
+    test_agent_connectivity()
+    # Uncomment the next line for interactive demo
+    # interactive_agent_demo()
