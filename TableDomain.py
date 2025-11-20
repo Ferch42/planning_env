@@ -275,9 +275,10 @@ class Agent:
         self.knowledge_base = {
             'known_rooms': set(),  # Room IDs the agent has visited
             'room_connections': set(),  # Tuples (room1, room2) for connected rooms
-            'object_locations': {},  # Maps object_id to room_id where it was found
+            'object_locations': {},  # Maps object_id to room_id where objects are located
             'current_room': None,
-            'previous_room': None  # Track previous room to detect connections
+            'previous_room': None,  # Track previous room to detect connections
+            'previous_inventory': None  # Track inventory changes
         }
         
         # Initialize with starting room knowledge
@@ -287,6 +288,7 @@ class Agent:
         """Update knowledge based on current state"""
         state = self.grid_world.get_state()
         current_room = state['room_id']
+        current_inventory = state['inventory']
         
         # Update room tracking
         self.knowledge_base['previous_room'] = self.knowledge_base['current_room']
@@ -305,10 +307,27 @@ class Agent:
             connection = tuple(sorted([room1, room2]))  # Sort to avoid duplicates like (0,1) and (1,0)
             self.knowledge_base['room_connections'].add(connection)
         
-        # If agent has an object in inventory, record its location
-        if state['inventory'] is not None:
-            obj_id = state['inventory']
+        # Detect object putdown: when inventory changes from an object to None AND agent is at a table
+        if (self.knowledge_base['previous_inventory'] is not None and 
+            current_inventory is None and
+            self.grid_world.agent_pos in self.grid_world.table_positions):
+            
+            # Agent just put down an object at a table - record its location
+            obj_id = self.knowledge_base['previous_inventory']
             self.knowledge_base['object_locations'][obj_id] = current_room
+        
+        # Detect object pickup: when inventory changes from None to an object
+        elif (self.knowledge_base['previous_inventory'] is None and 
+              current_inventory is not None and
+              self.grid_world.agent_pos in self.grid_world.table_positions):
+            
+            # Agent just picked up an object - remove it from known locations
+            obj_id = current_inventory
+            if obj_id in self.knowledge_base['object_locations']:
+                del self.knowledge_base['object_locations'][obj_id]
+        
+        # Update previous inventory for next comparison
+        self.knowledge_base['previous_inventory'] = current_inventory
     
     def step(self, action):
         """Take an action and update knowledge"""
@@ -376,108 +395,10 @@ class Agent:
         for room, connected in sorted(graph.items()):
             print(f"  Room {room} → {sorted(connected)}")
         
-        print("\nObject Locations:")
+        print("\nObject Locations (objects on tables):")
         if kb['object_locations']:
             for obj_id, room_id in kb['object_locations'].items():
                 obj_name = ObjectType(obj_id).name
                 print(f"  {obj_name} is in Room {room_id}")
         else:
             print("  No object locations known")
-
-
-# Enhanced testing function
-def test_agent_connectivity():
-    print("=== Testing Agent Room Connectivity ===")
-    
-    # Create environment and agent
-    world = GridWorld(num_rooms=4, room_size=3)
-    agent = Agent(world)
-    
-    print("Initial knowledge:")
-    agent.render_knowledge()
-    
-    # Test moving through multiple rooms to build connectivity
-    print("\n--- Exploring to build connectivity ---")
-    
-    # Move through a path that connects multiple rooms
-    # This sequence should move through rooms 0, 1, 3, 2
-    actions = [
-        1,  # DOWN to door
-        1,  # DOWN through door to room 1
-        3,  # RIGHT
-        3,  # RIGHT  
-        1,  # DOWN to door
-        1,  # DOWN through door to room 3
-        2,  # LEFT
-        2,  # LEFT
-        0,  # UP to door
-        0,  # UP through door to room 2
-    ]
-    
-    for i, action in enumerate(actions):
-        print(f"\nStep {i+1}: Action {['UP', 'DOWN', 'LEFT', 'RIGHT', 'TOGGLE'][action]}")
-        agent.step(action)
-        
-        # Show minimal state
-        state = world.get_state()
-        print(f"Position: {world.agent_pos}, Room: {state['room_id']}, Inventory: {state['inventory']}")
-        
-        # Show connectivity progress every few steps
-        if (i + 1) % 3 == 0 or i == len(actions) - 1:
-            print("Current connectivity:")
-            kb = agent.get_knowledge()
-            for conn in sorted(kb['room_connections']):
-                print(f"  Room {conn[0]} ↔ Room {conn[1]}")
-    
-    print("\nFinal knowledge state:")
-    agent.render_knowledge()
-    
-    # Test knowledge queries
-    print("\n--- Testing Knowledge Queries ---")
-    print(f"Knows room 0: {agent.knows_room(0)}")
-    print(f"Knows room 4: {agent.knows_room(4)}")  # Should be False
-    print(f"Knows connection between 0 and 1: {agent.knows_connection(0, 1)}")
-    print(f"Rooms connected to 1: {sorted(agent.get_connected_rooms(1))}")
-
-
-def interactive_agent_demo():
-    """Interactive demo showing agent learning about environment"""
-    print("\n=== Interactive Agent Demo ===")
-    
-    world = GridWorld(num_rooms=9, room_size=3)  # 3x3 rooms for more interesting exploration
-    agent = Agent(world)
-    
-    print("Agent starts with no knowledge of the world!")
-    agent.render_knowledge()
-    
-    # Simple manual control
-    action_names = ["UP", "DOWN", "LEFT", "RIGHT", "TOGGLE"]
-    
-    while True:
-        print("\n" + "="*50)
-        world.render()
-        agent.render_knowledge()
-        
-        print("\nAvailable actions: 0=UP, 1=DOWN, 2=LEFT, 3=RIGHT, 4=TOGGLE, 5=QUIT")
-        try:
-            action = int(input("Enter action: "))
-            if action == 5:
-                break
-            if action < 0 or action > 4:
-                print("Invalid action!")
-                continue
-                
-            print(f"\nExecuting: {action_names[action]}")
-            agent.step(action)
-            
-        except ValueError:
-            print("Please enter a number!")
-        except KeyboardInterrupt:
-            break
-
-
-if __name__ == "__main__":
-    # Add these to your existing main section
-    test_agent_connectivity()
-    # Uncomment the next line for interactive demo
-    # interactive_agent_demo()
