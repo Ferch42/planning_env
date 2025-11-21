@@ -764,640 +764,216 @@ class KnowledgeBasedPlanner:
         return None
 
 
-class ExplorationPlanner:
-    """Handles exploration when knowledge is incomplete"""
+class GoalConditionedQLearning:
+    def __init__(self, grid_world, learning_rate=0.1, discount_factor=0.9):
+        self.grid_world = grid_world
+        self.alpha = learning_rate
+        self.gamma = discount_factor
+        
+        # Get all important transitions
+        transitions = grid_world.get_important_transitions()
+        self.all_transitions = transitions['door_transitions'] + transitions['object_transitions']
+        
+        # Create Q-tables for each transition goal
+        self.q_tables = {}
+        for i, transition in enumerate(self.all_transitions):
+            self.q_tables[i] = defaultdict(lambda: np.zeros(5))  # 5 actions
+        
+        # Track learning progress
+        self.q_value_sums = [[] for _ in range(len(self.all_transitions))]
     
-    def __init__(self, agent):
-        self.agent = agent
+    def get_state_key(self, position):
+        """Convert position to hashable state key"""
+        return position
     
-    def plan_exploration(self, target_object_id=None):
-        """Plan exploration to discover unknown areas or find specific object"""
-        kb = self.agent.get_knowledge()
-        graph = self.agent.get_known_connectivity_graph()
-        
-        # Find unexplored connections or rooms with tables we haven't checked
-        # For simplicity, return rooms to explore
-        rooms_to_explore = []
-        
-        # Explore rooms that are connected but we haven't verified objects in
-        for room in kb['known_rooms']:
-            if target_object_id is None or target_object_id not in kb['object_locations']:
-                rooms_to_explore.append(room)
-        
-        return rooms_to_explore[:3]  # Limit exploration scope
-
-
-# Test the Planning Domain
-class TestPlanningDomainSeparation(unittest.TestCase):
-    """Test the properly separated planning domain"""
+    def choose_action(self, state_key):
+        """Always choose random action (pure exploration)"""
+        return random.randint(0, 4)
     
-    def setUp(self):
-        self.domain = PlanningDomain()
-        self.world = GridWorld(num_rooms=9, room_size=5)
-        self.agent = Agent(self.world)
+    def check_transition_activation(self, prev_state, action, next_state):
+        """Check if any important transition was activated"""
+        for i, transition in enumerate(self.all_transitions):
+            if (transition['prev_position'] == prev_state and 
+                transition['action'] == action and
+                transition['next_position'] == next_state):
+                return i  # Return transition index
+        return None
     
-    def test_01_pure_domain_actions(self):
-        """Test pure planning domain actions"""
-        print("\n=== Test 01: Pure Domain Actions ===")
+    def learn_from_experience(self, prev_state, action, next_state, activated_transition):
+        """Update ALL goal policies with the same experience"""
+        prev_key = self.get_state_key(prev_state)
+        next_key = self.get_state_key(next_state)
         
-        # Create a test state
-        test_state = {
-            'agent_location': 0,
-            'agent_inventory': None,
-            'object_locations': {1: 0},  # Object 1 in room 0
-            'room_connections': {0: {1}, 1: {0}},
-            'tables': {0, 1}
-        }
-        
-        # Test pick up action
-        new_state, msg = self.domain.apply_action(
-            test_state, ActionType.PICK_UP, object_id=1, room=0
-        )
-        self.assertIsNotNone(new_state)
-        self.assertEqual(new_state['agent_inventory'], 1)
-        self.assertNotIn(1, new_state['object_locations'])
-        
-        print("✓ Pure domain actions work correctly")
-    
-    def test_02_applicable_actions(self):
-        """Test getting applicable actions"""
-        print("\n=== Test 02: Applicable Actions ===")
-        
-        test_state = {
-            'agent_location': 0,
-            'agent_inventory': None,
-            'object_locations': {1: 0},
-            'room_connections': {0: {1}, 1: {0}},
-            'tables': {0, 1}
-        }
-        
-        actions = self.domain.get_applicable_actions(test_state)
-        self.assertGreater(len(actions), 0)
-        
-        # Should have move and pick up actions
-        action_types = [action[0] for action in actions]
-        self.assertIn(ActionType.MOVE, action_types)
-        self.assertIn(ActionType.PICK_UP, action_types)
-        
-        print("✓ Applicable actions identified correctly")
-    
-    def test_03_planner_bfs(self):
-        """Test BFS planner"""
-        print("\n=== Test 03: BFS Planner ===")
-        
-        planner = Planner(self.domain)
-        
-        # Simple state where object is in same room
-        test_state = {
-            'agent_location': 0,
-            'agent_inventory': None,
-            'object_locations': {1: 0},
-            'room_connections': {0: {1}, 1: {0}},
-            'tables': {0, 1}
-        }
-        
-        goal = {'object_location': {'object_id': 1, 'room': 1}}
-        
-        plan = planner.bfs_plan(test_state, goal)
-        self.assertIsNotNone(plan)
-        self.assertGreater(len(plan), 0)
-        
-        print("✓ BFS planner found valid plan")
-        for action_type, params, desc in plan:
-            print(f"  - {desc}")
-    
-    def test_04_knowledge_based_planner(self):
-        """Test knowledge-based planner"""
-        print("\n=== Test 04: Knowledge-Based Planner ===")
-        
-        # Set up agent knowledge
-        self.agent.knowledge_base['known_rooms'] = {0, 1}
-        self.agent.knowledge_base['room_connections'] = {(0, 1)}
-        self.agent.knowledge_base['object_locations'] = {1: 0}
-        self.agent.knowledge_base['current_room'] = 0
-        
-        # Set up world state
-        table_positions = list(self.world.table_positions.keys())
-        if table_positions:
-            # Place object in room 0
-            for table_pos, room_coords in self.world.table_positions.items():
-                if self.world.room_ids[table_pos] == 0:
-                    self.world.grid[table_pos] = 1
-                    break
-        
-        kb_planner = KnowledgeBasedPlanner(self.domain, self.agent)
-        
-        goal = {'object_location': {'object_id': 1, 'room': 1}}
-        plan = kb_planner.plan_with_current_knowledge(goal)
-        
-        self.assertIsNotNone(plan)
-        print("✓ Knowledge-based planner created plan")
-    
-    def test_05_exploration_planner(self):
-        """Test exploration planner"""
-        print("\n=== Test 05: Exploration Planner ===")
-        
-        # Set up partial knowledge
-        self.agent.knowledge_base['known_rooms'] = {0, 1}
-        self.agent.knowledge_base['room_connections'] = {(0, 1)}
-        self.agent.knowledge_base['object_locations'] = {}  # No objects known
-        
-        exploration_planner = ExplorationPlanner(self.agent)
-        exploration_plan = exploration_planner.plan_exploration(target_object_id=1)
-        
-        self.assertIsNotNone(exploration_plan)
-        print("✓ Exploration planner created exploration plan")
-    
-    def test_06_goal_recognition(self):
-        """Test goal state recognition"""
-        print("\n=== Test 06: Goal Recognition ===")
-        
-        goal_state = {
-            'agent_location': 1,
-            'agent_inventory': None,
-            'object_locations': {1: 1},  # Object 1 in room 1
-            'room_connections': {0: {1}, 1: {0}},
-            'tables': {0, 1}
-        }
-        
-        goal = {'object_location': {'object_id': 1, 'room': 1}}
-        is_goal = self.domain.is_goal_state(goal_state, goal)
-        self.assertTrue(is_goal)
-        
-        print("✓ Goal state correctly recognized")
-    
-    def test_07_invalid_actions(self):
-        """Test handling of invalid actions"""
-        print("\n=== Test 07: Invalid Actions ===")
-        
-        test_state = {
-            'agent_location': 0,
-            'agent_inventory': None,
-            'object_locations': {1: 1},  # Object in different room
-            'room_connections': {0: {1}, 1: {0}},
-            'tables': {0, 1}
-        }
-        
-        # Try to pick up object from wrong room
-        new_state, msg = self.domain.apply_action(
-            test_state, ActionType.PICK_UP, object_id=1, room=0
-        )
-        self.assertIsNone(new_state)
-        self.assertIn("not in room", msg)
-        
-        print("✓ Invalid actions properly rejected")
-
-
-class RealisticPlanningTests(unittest.TestCase):
-    """Fixed realistic tests that match actual planner behavior"""
-    
-    def setUp(self):
-        self.world = GridWorld(num_rooms=9, room_size=5)
-        self.agent = Agent(self.world)
-        self.domain = PlanningDomain()
-        self.planner = Planner(self.domain)
-        self.kb_planner = KnowledgeBasedPlanner(self.domain, self.agent)
-    
-    def test_01_simple_delivery_known_location(self):
-        """Test simple delivery when object location is known - FIXED"""
-        print("\n=== Test 01: Simple Delivery Known Location (FIXED) ===")
-        
-        # Set up a simple known state where we need to move object from room 0 to room 1
-        planning_state = {
-            'agent_location': 0,
-            'agent_inventory': None,
-            'object_locations': {ObjectType.KEY.value: 0},  # KEY in room 0
-            'room_connections': {0: {1}, 1: {0}},
-            'tables': {0, 1}
-        }
-        
-        goal = {'object_location': {'object_id': ObjectType.KEY.value, 'room': 1}}
-        
-        plan = self.planner.bfs_plan(planning_state, goal)
-        self.assertIsNotNone(plan, "Should find plan for simple delivery")
-        
-        # The correct plan should be: PICK_UP, MOVE, PUT_DOWN (3 actions)
-        print(f"Plan found: {len(plan)} actions")
-        for i, (action_type, params, desc) in enumerate(plan):
-            print(f"  {i+1}. {desc}")
-        
-        # Verify plan execution leads to goal
-        final_state = self._simulate_plan(planning_state, plan)
-        self.assertTrue(self.domain.is_goal_state(final_state, goal))
-        
-        print("✓ Simple delivery planning works correctly")
-    
-    def test_02_goal_already_satisfied(self):
-        """Test when goal is already satisfied - FIXED"""
-        print("\n=== Test 02: Goal Already Satisfied (FIXED) ===")
-        
-        planning_state = {
-            'agent_location': 0,
-            'agent_inventory': None,
-            'object_locations': {ObjectType.KEY.value: 1},  # KEY already in target room
-            'room_connections': {0: {1}, 1: {0}},
-            'tables': {0, 1}
-        }
-        
-        goal = {'object_location': {'object_id': ObjectType.KEY.value, 'room': 1}}
-        
-        plan = self.planner.bfs_plan(planning_state, goal)
-        
-        # When goal is already satisfied, should return empty plan, not None
-        self.assertEqual(plan, [], "Should return empty plan when goal is already satisfied")
-        
-        print("✓ Correctly handles already satisfied goals")
-    
-    def test_03_agent_holding_object(self):
-        """Test when agent is already holding the target object - FIXED"""
-        print("\n=== Test 03: Agent Holding Object (FIXED) ===")
-        
-        planning_state = {
-            'agent_location': 0,
-            'agent_inventory': ObjectType.KEY.value,  # Agent already holding KEY
-            'object_locations': {},  # No objects in world (agent has it)
-            'room_connections': {0: {1}, 1: {0}},
-            'tables': {0, 1}
-        }
-        
-        goal = {'object_location': {'object_id': ObjectType.KEY.value, 'room': 1}}
-        
-        plan = self.planner.bfs_plan(planning_state, goal)
-        self.assertIsNotNone(plan, "Should find plan when agent is holding object")
-        
-        print(f"Plan found: {len(plan)} actions")
-        for i, (action_type, params, desc) in enumerate(plan):
-            print(f"  {i+1}. {desc}")
-        
-        # Plan should be: move to room 1, put down (2 actions)
-        final_state = self._simulate_plan(planning_state, plan)
-        self.assertTrue(self.domain.is_goal_state(final_state, goal))
-        
-        print("✓ Planning works when agent is already holding object")
-    
-    def test_04_unreachable_object(self):
-        """Test when object is in unreachable room - FIXED"""
-        print("\n=== Test 04: Unreachable Object (FIXED) ===")
-        
-        planning_state = {
-            'agent_location': 0,
-            'agent_inventory': None,
-            'object_locations': {ObjectType.KEY.value: 2},  # Room 2 not connected
-            'room_connections': {0: {1}, 1: {0}},  # No connection to room 2
-            'tables': {0, 1, 2}
-        }
-        
-        goal = {'object_location': {'object_id': ObjectType.KEY.value, 'room': 0}}
-        
-        plan = self.planner.bfs_plan(planning_state, goal)
-        self.assertIsNone(plan, "Should not find plan for unreachable object")
-        
-        print("✓ Correctly identifies unreachable objects")
-    
-    def test_05_knowledge_based_simple_delivery(self):
-        """Test knowledge-based planning with simple scenario - FIXED"""
-        print("\n=== Test 05: Knowledge-Based Simple Delivery (FIXED) ===")
-        
-        # Set up agent knowledge
-        self.agent.knowledge_base.update({
-            'known_rooms': {0, 1},
-            'room_connections': {(0, 1)},
-            'object_locations': {ObjectType.KEY.value: 0},
-            'current_room': 0
-        })
-        
-        # Set up actual world state to match knowledge
-        for table_pos, room_coords in self.world.table_positions.items():
-            room_id = self.world.room_ids[table_pos]
-            if room_id == 0:
-                self.world.grid[table_pos] = ObjectType.KEY.value
-                # Place agent at the table in room 0
-                self.world.agent_pos = table_pos
-                break
-        
-        goal = {'object_location': {'object_id': ObjectType.KEY.value, 'room': 1}}
-        
-        plan = self.kb_planner.plan_with_current_knowledge(goal)
-        self.assertIsNotNone(plan, "Knowledge-based planner should find plan")
-        
-        print("Knowledge-based plan:")
-        for i, (action_type, params, description) in enumerate(plan):
-            print(f"  {i+1}. {description}")
-        
-        print("✓ Knowledge-based planning works for simple scenario")
-    
-    def test_06_action_validation(self):
-        """Test that generated actions are actually valid - FIXED"""
-        print("\n=== Test 06: Action Validation (FIXED) ===")
-        
-        # Create a state where object is in room 1, agent in room 0
-        planning_state = {
-            'agent_location': 0,
-            'agent_inventory': None,
-            'object_locations': {ObjectType.KEY.value: 1},  # Object in room 1
-            'room_connections': {0: {1}, 1: {0, 2}, 2: {1}},
-            'tables': {0, 1, 2}
-        }
-        
-        goal = {'object_location': {'object_id': ObjectType.KEY.value, 'room': 2}}
-        
-        plan = self.planner.bfs_plan(planning_state, goal)
-        self.assertIsNotNone(plan, "Should find plan")
-        
-        # Verify every action is applicable when executed
-        current_state = copy.deepcopy(planning_state)
-        for i, (action_type, params, description) in enumerate(plan):
-            print(f"  Step {i+1}: {description}")
+        for goal_index in range(len(self.all_transitions)):
+            # Determine reward and terminal status for this goal
+            if activated_transition == goal_index:
+                # This is the goal transition for this policy
+                reward = 1
+                terminal = True  # Terminal for this specific goal's MDP
+            elif activated_transition is not None:
+                # Some other transition was activated - terminal with 0 reward
+                reward = 0
+                terminal = True
+            else:
+                # No transition activated - continue learning
+                reward = 0
+                terminal = False
             
-            # Check if action is applicable
-            applicable_actions = self.domain.get_applicable_actions(current_state)
-            is_applicable = any(
-                app_action_type == action_type and app_params == params
-                for app_action_type, app_params in applicable_actions
-            )
+            # Get current Q-value
+            current_q = self.q_tables[goal_index][prev_key][action]
             
-            self.assertTrue(is_applicable, 
-                          f"Action {i+1} should be applicable: {description}\n"
-                          f"Current state: agent_loc={current_state['agent_location']}, "
-                          f"inventory={current_state['agent_inventory']}, "
-                          f"obj_locs={current_state['object_locations']}")
+            if terminal:
+                # Terminal state for this goal's MDP - no future rewards
+                target = reward
+            else:
+                # Continue learning - bootstrap from next state
+                next_max = np.max(self.q_tables[goal_index][next_key])
+                target = reward + self.gamma * next_max
             
-            # Apply action
-            new_state, msg = self.domain.apply_action(current_state, action_type, **params)
-            self.assertIsNotNone(new_state, f"Action {i+1} should succeed: {msg}")
-            current_state = new_state
-        
-        # Verify goal is achieved
-        self.assertTrue(self.domain.is_goal_state(current_state, goal))
-        
-        print("✓ All generated actions are valid and executable")
+            # Update Q-value
+            new_q = current_q + self.alpha * (target - current_q)
+            self.q_tables[goal_index][prev_key][action] = new_q
     
-    def test_07_multiple_objects_same_room(self):
-        """Test planning with multiple objects in the same room - FIXED"""
-        print("\n=== Test 07: Multiple Objects Same Room (FIXED) ===")
-        
-        # FIX: Both objects are in room 0
-        planning_state = {
-            'agent_location': 0,
-            'agent_inventory': None,
-            'object_locations': {
-                ObjectType.KEY.value: 0,      # KEY in room 0
-                ObjectType.TREASURE.value: 0  # TREASURE in room 0
-            },
-            'room_connections': {0: {1}, 1: {0}},
-            'tables': {0, 1}
-        }
-        
-        goal = {'object_location': {'object_id': ObjectType.TREASURE.value, 'room': 1}}
-        
-        plan = self.planner.bfs_plan(planning_state, goal)
-        self.assertIsNotNone(plan, "Should find plan with multiple objects")
-        
-        print("Plan for multiple objects:")
-        for i, (action_type, params, desc) in enumerate(plan):
-            print(f"  {i+1}. {desc}")
-        
-        # Plan should pick up treasure, not key
-        pick_up_actions = [action for action in plan if action[0] == ActionType.PICK_UP]
-        if pick_up_actions:
-            self.assertEqual(pick_up_actions[0][1]['object_id'], ObjectType.TREASURE.value)
-        
-        final_state = self._simulate_plan(planning_state, plan)
-        self.assertTrue(self.domain.is_goal_state(final_state, goal))
-        
-        print("✓ Correctly handles multiple objects in same room")
+    def get_q_value_sum(self, goal_index):
+        """Calculate sum of all Q-values for a goal policy"""
+        total = 0
+        for state_actions in self.q_tables[goal_index].values():
+            total += np.sum(state_actions)
+        return total
     
-    def _simulate_plan(self, initial_state, plan):
-        """Simulate executing a plan and return the final state"""
-        current_state = copy.deepcopy(initial_state)
-        for action_type, params, description in plan:
-            new_state, msg = self.domain.apply_action(current_state, action_type, **params)
-            if new_state is None:
-                self.fail(f"Action failed during simulation: {action_type} with {params}. Message: {msg}")
-            current_state = new_state
-        return current_state
+    def train_continuous(self, total_steps=100000, log_interval=1000):
+        """Continuous training without episodes"""
+        print(f"Training {len(self.all_transitions)} goal-conditioned policies for {total_steps} steps...")
+        
+        # Start at initial position
+        self.grid_world.agent_pos = (1, 1)
+        self.grid_world.agent_inventory = None
+        
+        prev_state = self.grid_world.agent_pos
+        
+        for step in range(total_steps):
+            # Choose random action
+            action = self.choose_action(prev_state)
+            
+            # Take action in the real environment
+            self.grid_world.step(action)
+            next_state = self.grid_world.agent_pos
+            
+            # Check if any transition was activated
+            activated_transition = self.check_transition_activation(prev_state, action, next_state)
+            
+            # Learn from this experience for ALL goals
+            self.learn_from_experience(prev_state, action, next_state, activated_transition)
+            
+            # Move to next state for continued exploration
+            prev_state = next_state
+            
+            # Track learning progress
+            if step % log_interval == 0:
+                self._log_progress(step, total_steps)
+    
+    def _log_progress(self, step, total_steps):
+        """Log learning progress using Q-value sums"""
+        print(f"\nStep {step}/{total_steps}:")
+        print("Goal Policy Progress (Sum of Q-values):")
+        
+        for goal_index in range(len(self.all_transitions)):
+            q_sum = self.get_q_value_sum(goal_index)
+            self.q_value_sums[goal_index].append(q_sum)
+            
+            goal_desc = self.get_goal_description(goal_index)
+            print(f"  Goal {goal_index}: {q_sum:.2f} - {goal_desc}")
+        
+        # Show learning trends
+        if step > 0:
+            print("\nLearning Trends (change in Q-sum):")
+            for goal_index in range(len(self.all_transitions)):
+                if len(self.q_value_sums[goal_index]) >= 2:
+                    current = self.q_value_sums[goal_index][-1]
+                    previous = self.q_value_sums[goal_index][-2]
+                    change = current - previous
+                    trend = "↑" if change > 0 else "↓" if change < 0 else "→"
+                    print(f"  Goal {goal_index}: {change:+.2f} {trend}")
+    
+    def get_policy(self, goal_index, state):
+        """Get best action for a given goal and state"""
+        state_key = self.get_state_key(state)
+        return np.argmax(self.q_tables[goal_index][state_key])
+    
+    def get_goal_description(self, goal_index):
+        """Get description of a goal transition"""
+        transition = self.all_transitions[goal_index]
+        action_names = {0: "UP", 1: "DOWN", 2: "LEFT", 3: "RIGHT", 4: "TOGGLE"}
+        action_name = action_names.get(transition['action'], str(transition['action']))
+        return f"{transition['type']}: {transition['prev_position']} --{action_name}--> {transition['next_position']}"
+    
+    def evaluate_all_policies(self, test_steps=1000):
+        """Evaluate how well each policy performs using greedy action selection"""
+        print(f"\nEvaluating all policies for {test_steps} steps...")
+        
+        success_counts = [0] * len(self.all_transitions)
+        activation_counts = [0] * len(self.all_transitions)
+        
+        # Save current state to restore later
+        original_pos = self.grid_world.agent_pos
+        original_inventory = self.grid_world.agent_inventory
+        
+        # Test each policy
+        for goal_index in range(len(self.all_transitions)):
+            print(f"\nTesting policy for goal {goal_index}: {self.get_goal_description(goal_index)}")
+            
+            # Reset to starting position
+            self.grid_world.agent_pos = (1, 1)
+            self.grid_world.agent_inventory = None
+            
+            state = self.grid_world.agent_pos
+            steps_to_success = None
+            
+            for step in range(test_steps):
+                # Use learned policy (greedy)
+                action = self.get_policy(goal_index, state)
+                
+                prev_state = state
+                self.grid_world.step(action)
+                state = self.grid_world.agent_pos
+                
+                # Check if goal transition was activated
+                activated = self.check_transition_activation(prev_state, action, state)
+                if activated is not None:
+                    activation_counts[activated] += 1
+                    if activated == goal_index:
+                        success_counts[goal_index] += 1
+                        if steps_to_success is None:
+                            steps_to_success = step + 1
+                        break
+            
+            if steps_to_success:
+                print(f"  Success in {steps_to_success} steps")
+            else:
+                print(f"  No success in {test_steps} steps")
+        
+        # Restore original state
+        self.grid_world.agent_pos = original_pos
+        self.grid_world.agent_inventory = original_inventory
+        
+        print(f"\nOverall Success Rates:")
+        for goal_index in range(len(self.all_transitions)):
+            success_rate = success_counts[goal_index] / 1  # We tested each policy once
+            print(f"  Goal {goal_index}: {success_rate:.2f} ({success_counts[goal_index]}/1)")
 
+# Example usage:
+def main():
+    # Create environment
+    grid_world = GridWorld(num_rooms=25, room_size=5)
+    
+    # Create Q-learning agent
+    q_agent = GoalConditionedQLearning(grid_world, learning_rate=0.1, discount_factor=0.9)
+    
+    # Train all policies continuously
+    q_agent.train_continuous(total_steps=50000, log_interval=5000)
+    
+    # Evaluate learned policies
+    q_agent.evaluate_all_policies(test_steps=1000)
 
-# Update the demonstration function to use the fixed planner
-def demonstrate_separated_planning():
-    """Demonstrate the properly separated planning system"""
-    print("\n" + "=" * 70)
-    print("SEPARATED PLANNING SYSTEM DEMONSTRATION")
-    print("=" * 70)
-    
-    # Create components
-    domain = PlanningDomain()
-    world = GridWorld(num_rooms=9, room_size=5)
-    agent = Agent(world)
-    
-    # Set up a known state for planning where we actually need to move the object
-    planning_state = {
-        'agent_location': 0,
-        'agent_inventory': None,
-        'object_locations': {
-            ObjectType.KEY.value: 0,  # KEY in room 0
-            ObjectType.TREASURE.value: 2  # TREASURE in room 2
-        },
-        'room_connections': {
-            0: {1, 2},
-            1: {0, 3},
-            2: {0, 4},
-            3: {1},
-            4: {2}
-        },
-        'tables': {0, 1, 2, 3, 4}
-    }
-    
-    # Define goal: deliver KEY to room 4 (NOT where it currently is)
-    goal = {
-        'object_location': {
-            'object_id': ObjectType.KEY.value,
-            'room': 4
-        }
-    }
-    
-    # Plan using pure domain
-    planner = Planner(domain)
-    plan = planner.bfs_plan(planning_state, goal)
-    
-    if plan:
-        print("Pure planning domain plan:")
-        for i, (action_type, params, description) in enumerate(plan):
-            print(f"  {i+1}. {description}")
-    else:
-        print("No plan found with pure planning domain")
-    
-    # Demonstrate knowledge-based planning
-    print("\nKnowledge-based planning:")
-    kb_planner = KnowledgeBasedPlanner(domain, agent)
-    
-    # Set up agent knowledge to match our planning state
-    print("Building agent knowledge through exploration...")
-    _build_agent_knowledge(agent, world)
-    
-    # Now set up the specific knowledge for our scenario
-    # KEY is in room 0, we want to deliver to room 4
-    agent.knowledge_base.update({
-        'known_rooms': set(planning_state['room_connections'].keys()),
-        'object_locations': {ObjectType.KEY.value: 0},  # Only KEY in room 0
-        'current_room': planning_state['agent_location']
-    })
-    
-    # Convert connections to the format agent expects
-    for room, connections in planning_state['room_connections'].items():
-        for connected_room in connections:
-            agent.knowledge_base['room_connections'].add(
-                tuple(sorted([room, connected_room]))
-            )
-    
-    # Also set up the actual world state to match
-    _setup_world_state(world, planning_state)
-    
-    print("Agent knowledge after setup:")
-    agent.render_knowledge()
-    
-    print(f"\nGoal: Deliver KEY (object {ObjectType.KEY.value}) to room 4")
-    
-    kb_plan = kb_planner.plan_with_current_knowledge(goal)
-    
-    if kb_plan:
-        print("Knowledge-based plan:")
-        for i, (action_type, params, description) in enumerate(kb_plan):
-            print(f"  {i+1}. {description}")
-        
-        # Try to execute the plan (simulated)
-        print("\nExecuting plan...")
-        success, message = kb_planner.execute_plan(kb_plan)
-        print(f"Execution result: {message}")
-        
-        if success:
-            # Show final state
-            print("\nFinal world state:")
-            world.render()
-            print("\nFinal agent knowledge:")
-            agent.render_knowledge()
-    else:
-        print("No plan found with knowledge-based planning")
-    
-    # Demonstrate exploration planning
-    print("\nExploration planning:")
-    exploration_planner = ExplorationPlanner(agent)
-    exploration_targets = exploration_planner.plan_exploration(
-        target_object_id=ObjectType.TOOL.value
-    )
-    print(f"Exploration targets: {exploration_targets}")
-
-def _build_agent_knowledge(agent, world):
-    """Build some basic knowledge by exploring"""
-    transitions = world.get_important_transitions()
-    for trans in transitions['door_transitions'][:4]:
-        if world.grid[trans['prev_position']] == 0:
-            world.agent_pos = trans['prev_position']
-            agent._update_knowledge()
-            agent.step(trans['action'])
-
-def _setup_world_state(world, planning_state):
-    """Set up the actual world state to match the planning state"""
-    # Set agent position to a table in the starting room
-    for table_pos, room_coords in world.table_positions.items():
-        if world.room_ids[table_pos] == planning_state['agent_location']:
-            world.agent_pos = table_pos
-            break
-    
-    # Clear all tables first
-    for table_pos in world.table_positions:
-        world.grid[table_pos] = ObjectType.EMPTY.value
-    
-    # Place objects according to planning state
-    for obj_id, room_id in planning_state['object_locations'].items():
-        for table_pos, room_coords in world.table_positions.items():
-            if world.room_ids[table_pos] == room_id:
-                world.grid[table_pos] = obj_id
-                break
-
-
-def run_separated_planning_tests():
-    """Run tests for separated planning system"""
-    print("=" * 70)
-    print("SEPARATED PLANNING DOMAIN TEST SUITE")
-    print("=" * 70)
-    
-    # Create test suite
-    loader = unittest.TestLoader()
-    suite = loader.loadTestsFromTestCase(TestPlanningDomainSeparation)
-    
-    # Run tests
-    runner = unittest.TextTestRunner(verbosity=2)
-    result = runner.run(suite)
-    
-    # Print summary
-    print("\n" + "=" * 70)
-    print("SEPARATED PLANNING TEST SUMMARY")
-    print("=" * 70)
-    print(f"Tests run: {result.testsRun}")
-    print(f"Failures: {len(result.failures)}")
-    print(f"Errors: {len(result.errors)}")
-    print(f"Skipped: {len(result.skipped)}")
-    
-    if result.wasSuccessful():
-        print("🎉 ALL SEPARATED PLANNING TESTS PASSED!")
-    else:
-        print("❌ Some separated planning tests failed")
-        
-        for test, traceback in result.failures + result.errors:
-            print(f"\nFailed test: {test}")
-            print(f"Error: {traceback.splitlines()[-1]}")
-    
-    return result.wasSuccessful()
-
-
-def run_realistic_planning_tests():
-    """Run the realistic planning tests"""
-    print("=" * 70)
-    print("REALISTIC PLANNING TESTS")
-    print("=" * 70)
-    
-    # Create test suite
-    loader = unittest.TestLoader()
-    suite = loader.loadTestsFromTestCase(RealisticPlanningTests)
-    
-    # Run tests
-    runner = unittest.TextTestRunner(verbosity=2)
-    result = runner.run(suite)
-    
-    # Print summary
-    print("\n" + "=" * 70)
-    print("REALISTIC PLANNING TEST SUMMARY")
-    print("=" * 70)
-    print(f"Tests run: {result.testsRun}")
-    print(f"Failures: {len(result.failures)}")
-    print(f"Errors: {len(result.errors)}")
-    print(f"Skipped: {len(result.skipped)}")
-    
-    if result.wasSuccessful():
-        print("🎉 ALL REALISTIC PLANNING TESTS PASSED!")
-        print("✅ The planning system is working correctly for realistic scenarios!")
-    else:
-        print("❌ Some realistic planning tests failed")
-        
-        for test, traceback in result.failures + result.errors:
-            print(f"\nFailed test: {test}")
-            error_line = traceback.splitlines()[-1]
-            print(f"Error: {error_line}")
-    
-    return result.wasSuccessful()
-
-
-# Main execution
 if __name__ == "__main__":
-    # Run the original separated planning tests
-    original_success = run_separated_planning_tests()
-    
-    # Run the realistic tests
-    realistic_success = run_realistic_planning_tests()
-    
-    # Demonstrate the system
-    demonstrate_separated_planning()
-    
-    # Exit with appropriate code
-    exit(0 if (original_success and realistic_success) else 1)
+    main()
