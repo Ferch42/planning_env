@@ -763,7 +763,6 @@ class KnowledgeBasedPlanner:
         
         return None
 
-
 class GoalConditionedQLearning:
     def __init__(self, grid_world, learning_rate=0.1, discount_factor=0.9):
         self.grid_world = grid_world
@@ -841,12 +840,20 @@ class GoalConditionedQLearning:
             total += np.sum(state_actions)
         return total
     
-    def train_continuous(self, total_steps=100000, log_interval=1000):
-        """Continuous training without episodes"""
+    def get_random_valid_position(self):
+        """Get a random position that is not a wall"""
+        while True:
+            x = random.randint(0, self.grid_world.grid_size - 1)
+            y = random.randint(0, self.grid_world.grid_size - 1)
+            if self.grid_world.grid[x, y] != 1:  # Not a wall
+                return (x, y)
+    
+    def train_continuous(self, total_steps=1000000, log_interval=10000):
+        """Continuous training without episodes - with longer duration"""
         print(f"Training {len(self.all_transitions)} goal-conditioned policies for {total_steps} steps...")
         
-        # Start at initial position
-        self.grid_world.agent_pos = (1, 1)
+        # Start at a random valid position
+        self.grid_world.agent_pos = self.get_random_valid_position()
         self.grid_world.agent_inventory = None
         
         prev_state = self.grid_world.agent_pos
@@ -907,59 +914,77 @@ class GoalConditionedQLearning:
         action_name = action_names.get(transition['action'], str(transition['action']))
         return f"{transition['type']}: {transition['prev_position']} --{action_name}--> {transition['next_position']}"
     
-    def evaluate_all_policies(self, test_steps=1000):
-        """Evaluate how well each policy performs using greedy action selection"""
-        print(f"\nEvaluating all policies for {test_steps} steps...")
-        
-        success_counts = [0] * len(self.all_transitions)
-        activation_counts = [0] * len(self.all_transitions)
+    def evaluate_all_policies(self, num_tests=100, max_steps_per_test=500):
+        """Evaluate each policy from multiple random starting positions"""
+        print(f"\nEvaluating all policies with {num_tests} random starts each...")
         
         # Save current state to restore later
         original_pos = self.grid_world.agent_pos
         original_inventory = self.grid_world.agent_inventory
         
+        success_rates = []
+        avg_steps_to_success = []
+        
         # Test each policy
         for goal_index in range(len(self.all_transitions)):
             print(f"\nTesting policy for goal {goal_index}: {self.get_goal_description(goal_index)}")
             
-            # Reset to starting position
-            self.grid_world.agent_pos = (1, 1)
-            self.grid_world.agent_inventory = None
+            successes = 0
+            total_steps = 0
             
-            state = self.grid_world.agent_pos
-            steps_to_success = None
-            
-            for step in range(test_steps):
-                # Use learned policy (greedy)
-                action = self.get_policy(goal_index, state)
+            for test_idx in range(num_tests):
+                # Start from a random valid position
+                self.grid_world.agent_pos = self.get_random_valid_position()
+                self.grid_world.agent_inventory = None
                 
-                prev_state = state
-                self.grid_world.step(action)
                 state = self.grid_world.agent_pos
+                found_goal = False
                 
-                # Check if goal transition was activated
-                activated = self.check_transition_activation(prev_state, action, state)
-                if activated is not None:
-                    activation_counts[activated] += 1
+                for step in range(max_steps_per_test):
+                    # Use learned policy (greedy)
+                    action = self.get_policy(goal_index, state)
+                    
+                    prev_state = state
+                    self.grid_world.step(action)
+                    state = self.grid_world.agent_pos
+                    
+                    # Check if goal transition was activated
+                    activated = self.check_transition_activation(prev_state, action, state)
                     if activated == goal_index:
-                        success_counts[goal_index] += 1
-                        if steps_to_success is None:
-                            steps_to_success = step + 1
+                        successes += 1
+                        total_steps += step + 1
+                        found_goal = True
                         break
+                    elif activated is not None:
+                        # Wrong transition activated
+                        break
+                
+                if test_idx % 20 == 0:
+                    print(f"  Test {test_idx+1}/{num_tests}: {successes} successes so far")
             
-            if steps_to_success:
-                print(f"  Success in {steps_to_success} steps")
-            else:
-                print(f"  No success in {test_steps} steps")
+            success_rate = successes / num_tests
+            avg_steps = total_steps / successes if successes > 0 else float('inf')
+            
+            success_rates.append(success_rate)
+            avg_steps_to_success.append(avg_steps)
+            
+            print(f"  Final: {success_rate:.2f} success rate ({successes}/{num_tests})")
+            if successes > 0:
+                print(f"  Average steps to success: {avg_steps:.2f}")
         
         # Restore original state
         self.grid_world.agent_pos = original_pos
         self.grid_world.agent_inventory = original_inventory
         
-        print(f"\nOverall Success Rates:")
+        # Print summary
+        print(f"\n=== EVALUATION SUMMARY ===")
         for goal_index in range(len(self.all_transitions)):
-            success_rate = success_counts[goal_index] / 1  # We tested each policy once
-            print(f"  Goal {goal_index}: {success_rate:.2f} ({success_counts[goal_index]}/1)")
+            print(f"Goal {goal_index}: {success_rates[goal_index]:.2f} success rate")
+            if success_rates[goal_index] > 0:
+                print(f"  Average steps: {avg_steps_to_success[goal_index]:.2f}")
+            print(f"  Description: {self.get_goal_description(goal_index)}")
+        
+        return success_rates, avg_steps_to_success
 
 # Example usage:
 def main():
@@ -969,11 +994,11 @@ def main():
     # Create Q-learning agent
     q_agent = GoalConditionedQLearning(grid_world, learning_rate=0.1, discount_factor=0.9)
     
-    # Train all policies continuously
-    q_agent.train_continuous(total_steps=50000, log_interval=5000)
+    # Train all policies continuously for longer
+    q_agent.train_continuous(total_steps=1000000, log_interval=100000)
     
-    # Evaluate learned policies
-    q_agent.evaluate_all_policies(test_steps=1000)
+    # Evaluate learned policies with random starts
+    q_agent.evaluate_all_policies(num_tests=100, max_steps_per_test=500)
 
 if __name__ == "__main__":
     main()
