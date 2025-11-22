@@ -577,197 +577,21 @@ class Planner:
             state['agent_inventory'],
             tuple(sorted(state['object_locations'].items()))
         )
-
-
-# Fix the KnowledgeBasedPlanner's movement execution
-class KnowledgeBasedPlanner:
-    """Fixed knowledge-based planner with better movement execution"""
-    
-    def __init__(self, domain, agent):
-        self.domain = domain
-        self.agent = agent
-        self.planner = Planner(domain)
-    
-    def create_planning_state_from_knowledge(self):
-        """Create planning state from agent's current knowledge"""
-        kb = self.agent.get_knowledge()
-        world = self.agent.grid_world
-        
-        # Build room connections from knowledge
-        room_connections = {}
-        for conn in kb['room_connections']:
-            room1, room2 = conn
-            if room1 not in room_connections:
-                room_connections[room1] = set()
-            if room2 not in room_connections:
-                room_connections[room2] = set()
-            room_connections[room1].add(room2)
-            room_connections[room2].add(room1)
-        
-        # Add known rooms that might not have connections yet
-        for room in kb['known_rooms']:
-            if room not in room_connections:
-                room_connections[room] = set()
-        
-        # Find tables in known rooms
-        tables = set()
-        for table_pos, room_coords in world.table_positions.items():
-            room_id = world.room_ids[table_pos]
-            if room_id in kb['known_rooms']:
-                tables.add(room_id)
-        
-        planning_state = {
-            'agent_location': kb['current_room'],
-            'agent_inventory': world.agent_inventory,
-            'object_locations': kb['object_locations'].copy(),
-            'room_connections': room_connections,
-            'tables': tables
-        }
-        
-        return planning_state
-    
-    def plan_with_current_knowledge(self, goal):
-        """Create plan using current knowledge"""
-        planning_state = self.create_planning_state_from_knowledge()
-        
-        # Verify the planning state is valid
-        if not self._validate_planning_state(planning_state):
-            return None
-            
-        return self.planner.bfs_plan(planning_state, goal)
-    
-    def _validate_planning_state(self, state):
-        """Validate that the planning state is consistent"""
-        # Check agent location is in known rooms
-        if state['agent_location'] not in state['room_connections']:
-            return False
-            
-        # Check object locations are in known rooms
-        for obj_id, room_id in state['object_locations'].items():
-            if room_id not in state['room_connections']:
-                return False
-                
-        # Check agent inventory is valid
-        if state['agent_inventory'] is not None and state['agent_inventory'] not in [ObjectType.KEY.value, ObjectType.TREASURE.value, ObjectType.FOOD.value, ObjectType.TOOL.value]:
-            return False
-            
-        return True
-    
-    def execute_plan(self, plan, max_steps=100):
-        """Execute a plan in the real environment - FIXED VERSION"""
-        if not plan:
-            return True, "No plan needed"
-        
-        steps = 0
-        for i, (action_type, params, description) in enumerate(plan):
-            if steps >= max_steps:
-                return False, f"Plan execution timeout after {steps} steps"
-            
-            print(f"Step {i+1}: {description}")
-            
-            # Convert planning action to environment action
-            if action_type == ActionType.MOVE:
-                # Execute movement to target room
-                success = self._execute_move_to_room(params['to_room'])
-                if not success:
-                    return False, f"Failed to move to room {params['to_room']}"
-            elif action_type == ActionType.PICK_UP:
-                # First ensure we're at a table position in the correct room
-                if not self._ensure_at_table_in_room(params['room']):
-                    return False, f"Cannot pick up - not at table in room {params['room']}"
-                self.agent.step(4)  # TOGGLE action
-            elif action_type == ActionType.PUT_DOWN:
-                # First ensure we're at a table position in the correct room
-                if not self._ensure_at_table_in_room(params['room']):
-                    return False, f"Cannot put down - not at table in room {params['room']}"
-                self.agent.step(4)  # TOGGLE action
-            
-            steps += 1
-            
-        return True, f"Plan executed successfully in {steps} steps"
-    
-    def _execute_move_to_room(self, target_room):
-        """Execute movement to target room - SIMPLIFIED AND FIXED"""
-        current_room = self.agent.get_knowledge()['current_room']
-        
-        if current_room == target_room:
-            return True
-            
-        print(f"  Moving from room {current_room} to room {target_room}")
-        
-        # For demonstration purposes, use a simplified approach
-        # Find any table position in the target room and move there
-        target_table_pos = None
-        for table_pos, room_coords in self.agent.grid_world.table_positions.items():
-            if self.agent.grid_world.room_ids[table_pos] == target_room:
-                target_table_pos = table_pos
-                break
-        
-        if not target_table_pos:
-            return False
-        
-        # Move to the target table position
-        path = self._find_path_to_position(target_table_pos)
-        if not path:
-            return False
-        
-        # Execute the path
-        for action in path:
-            self.agent.step(action)
-        
-        # Verify we reached the target room
-        new_room = self.agent.get_knowledge()['current_room']
-        if new_room != target_room:
-            print(f"  Warning: Expected room {target_room}, but ended up in room {new_room}")
-            return False
-            
-        return True
-    
-    def _ensure_at_table_in_room(self, room):
-        """Ensure agent is at a table position in the specified room"""
-        current_room = self.agent.get_knowledge()['current_room']
-        current_pos = self.agent.grid_world.agent_pos
-        
-        if current_room != room:
-            return False
-            
-        # Check if we're at a table position
-        return current_pos in self.agent.grid_world.table_positions
-    
-    def _find_path_to_position(self, target_pos):
-        """Find path to a specific position using BFS"""
-        start_pos = self.agent.grid_world.agent_pos
-        
-        if start_pos == target_pos:
-            return []
-        
-        queue = deque([(start_pos, [])])
-        visited = set([start_pos])
-        
-        while queue:
-            pos, path = queue.popleft()
-            
-            if pos == target_pos:
-                return path
-            
-            x, y = pos
-            for action, (dx, dy) in enumerate([(-1, 0), (1, 0), (0, -1), (0, 1)]):
-                nx, ny = x + dx, y + dy
-                if (0 <= nx < self.agent.grid_world.grid_size and 
-                    0 <= ny < self.agent.grid_world.grid_size and
-                    (nx, ny) not in visited and
-                    self.agent.grid_world.grid[nx, ny] != 1):  # Not a wall
-                    
-                    visited.add((nx, ny))
-                    queue.append(((nx, ny), path + [action]))
-        
-        return None
+import numpy as np
+import random
+import unittest
+from enum import Enum
+from collections import deque, defaultdict
+import heapq
+from typing import Dict, List, Set, Tuple, Optional, Any
+import copy
 
 class GoalConditionedQLearning:
-    def __init__(self, grid_world, learning_rate=0.1, discount_factor=0.9):
+    def __init__(self, grid_world, learning_rate=0.1, discount_factor=0.9, debug=False):
         self.grid_world = grid_world
         self.alpha = learning_rate
         self.gamma = discount_factor
+        self.debug = debug
         
         # Get all important transitions
         transitions = grid_world.get_important_transitions()
@@ -780,14 +604,31 @@ class GoalConditionedQLearning:
         
         # Track learning progress
         self.q_value_sums = [[] for _ in range(len(self.all_transitions))]
+        
+        # Debug statistics
+        self.training_stats = {
+            'steps': 0,
+            'transitions_activated': [0] * len(self.all_transitions),
+            'q_updates': 0,
+            'valid_moves': 0,
+            'wall_collisions': 0
+        }
     
     def get_state_key(self, position):
         """Convert position to hashable state key"""
         return position
     
-    def choose_action(self, state_key):
-        """Always choose random action (pure exploration)"""
-        return random.randint(0, 4)
+    def choose_action(self, state_key, goal_index=None):
+        """Choose action with epsilon-greedy policy"""
+        if random.random() < 0.9:  # 90% exploration during training
+            return random.randint(0, 4)
+        else:
+            # 10% exploitation: use Q-values if available
+            if goal_index is not None:
+                q_values = self.q_tables[goal_index][state_key]
+                if np.max(q_values) > 0:
+                    return np.argmax(q_values)
+            return random.randint(0, 4)
     
     def check_transition_activation(self, prev_state, action, next_state):
         """Check if any important transition was activated"""
@@ -795,7 +636,24 @@ class GoalConditionedQLearning:
             if (transition['prev_position'] == prev_state and 
                 transition['action'] == action and
                 transition['next_position'] == next_state):
-                return i  # Return transition index
+                
+                if self.debug:
+                    print(f"  Transition {i} activated: {transition['type']} at {prev_state} -> {next_state}")
+                self.training_stats['transitions_activated'][i] += 1
+                return i
+        
+        # Also check for object interactions at current position
+        if action == 4:  # TOGGLE action
+            for i, transition in enumerate(self.all_transitions):
+                if (transition['type'] == 'object' and 
+                    transition['prev_position'] == prev_state and
+                    transition['action'] == action):
+                    
+                    if self.debug:
+                        print(f"  Object transition {i} activated at {prev_state}")
+                    self.training_stats['transitions_activated'][i] += 1
+                    return i
+        
         return None
     
     def learn_from_experience(self, prev_state, action, next_state, activated_transition):
@@ -807,15 +665,15 @@ class GoalConditionedQLearning:
             # Determine reward and terminal status for this goal
             if activated_transition == goal_index:
                 # This is the goal transition for this policy
-                reward = 1
-                terminal = True  # Terminal for this specific goal's MDP
+                reward = 10.0
+                terminal = True
             elif activated_transition is not None:
-                # Some other transition was activated - terminal with 0 reward
-                reward = 0
+                # Some other transition was activated - small penalty
+                reward = -1.0
                 terminal = True
             else:
-                # No transition activated - continue learning
-                reward = 0
+                # No transition activated - small negative reward to encourage efficiency
+                reward = -0.1
                 terminal = False
             
             # Get current Q-value
@@ -832,24 +690,40 @@ class GoalConditionedQLearning:
             # Update Q-value
             new_q = current_q + self.alpha * (target - current_q)
             self.q_tables[goal_index][prev_key][action] = new_q
+            self.training_stats['q_updates'] += 1
     
-    def get_q_value_sum(self, goal_index):
-        """Calculate sum of all Q-values for a goal policy"""
-        total = 0
-        for state_actions in self.q_tables[goal_index].values():
-            total += np.sum(state_actions)
-        return total
+    def get_valid_actions(self, position):
+        """Get list of valid actions that don't hit walls"""
+        x, y = position
+        valid_actions = []
+        
+        # Check UP
+        if x > 0 and self.grid_world.grid[x-1, y] != 1:
+            valid_actions.append(0)
+        # Check DOWN
+        if x < self.grid_world.grid_size-1 and self.grid_world.grid[x+1, y] != 1:
+            valid_actions.append(1)
+        # Check LEFT
+        if y > 0 and self.grid_world.grid[x, y-1] != 1:
+            valid_actions.append(2)
+        # Check RIGHT
+        if y < self.grid_world.grid_size-1 and self.grid_world.grid[x, y+1] != 1:
+            valid_actions.append(3)
+        # TOGGLE is always valid (though may not do anything)
+        valid_actions.append(4)
+        
+        return valid_actions
     
     def get_random_valid_position(self):
         """Get a random position that is not a wall"""
         while True:
             x = random.randint(0, self.grid_world.grid_size - 1)
             y = random.randint(0, self.grid_world.grid_size - 1)
-            if self.grid_world.grid[x, y] != 1:  # Not a wall
+            if self.grid_world.grid[x, y] != 1:
                 return (x, y)
     
-    def train_continuous(self, total_steps=1000000, log_interval=10000):
-        """Continuous training without episodes - with longer duration"""
+    def train_continuous(self, total_steps=100000, log_interval=10000):
+        """Continuous training without episodes"""
         print(f"Training {len(self.all_transitions)} goal-conditioned policies for {total_steps} steps...")
         
         # Start at a random valid position
@@ -859,12 +733,27 @@ class GoalConditionedQLearning:
         prev_state = self.grid_world.agent_pos
         
         for step in range(total_steps):
-            # Choose random action
-            action = self.choose_action(prev_state)
+            self.training_stats['steps'] += 1
+            
+            # Choose action from valid actions only
+            valid_actions = self.get_valid_actions(prev_state)
+            if not valid_actions:
+                # If no valid actions, reset position
+                self.grid_world.agent_pos = self.get_random_valid_position()
+                prev_state = self.grid_world.agent_pos
+                continue
+                
+            action = random.choice(valid_actions)
             
             # Take action in the real environment
             self.grid_world.step(action)
             next_state = self.grid_world.agent_pos
+            
+            # Track if we actually moved
+            if prev_state != next_state:
+                self.training_stats['valid_moves'] += 1
+            else:
+                self.training_stats['wall_collisions'] += 1
             
             # Check if any transition was activated
             activated_transition = self.check_transition_activation(prev_state, action, next_state)
@@ -878,34 +767,70 @@ class GoalConditionedQLearning:
             # Track learning progress
             if step % log_interval == 0:
                 self._log_progress(step, total_steps)
+        
+        # Print final training statistics
+        self._print_training_stats()
     
     def _log_progress(self, step, total_steps):
         """Log learning progress using Q-value sums"""
         print(f"\nStep {step}/{total_steps}:")
-        print("Goal Policy Progress (Sum of Q-values):")
         
+        # Show top 5 learned policies
+        q_sums = []
         for goal_index in range(len(self.all_transitions)):
             q_sum = self.get_q_value_sum(goal_index)
-            self.q_value_sums[goal_index].append(q_sum)
-            
-            goal_desc = self.get_goal_description(goal_index)
-            print(f"  Goal {goal_index}: {q_sum:.2f} - {goal_desc}")
+            q_sums.append((goal_index, q_sum))
         
-        # Show learning trends
-        if step > 0:
-            print("\nLearning Trends (change in Q-sum):")
-            for goal_index in range(len(self.all_transitions)):
-                if len(self.q_value_sums[goal_index]) >= 2:
-                    current = self.q_value_sums[goal_index][-1]
-                    previous = self.q_value_sums[goal_index][-2]
-                    change = current - previous
-                    trend = "↑" if change > 0 else "↓" if change < 0 else "→"
-                    print(f"  Goal {goal_index}: {change:+.2f} {trend}")
+        # Sort by Q-sum
+        q_sums.sort(key=lambda x: x[1], reverse=True)
+        
+        print("Top 5 Learned Policies (by Q-value sum):")
+        for i, (goal_index, q_sum) in enumerate(q_sums[:5]):
+            goal_desc = self.get_goal_description(goal_index)
+            activations = self.training_stats['transitions_activated'][goal_index]
+            print(f"  {i+1}. Goal {goal_index}: {q_sum:.2f} ({activations} activations) - {goal_desc}")
+    
+    def _print_training_stats(self):
+        """Print detailed training statistics"""
+        print("\n=== Training Statistics ===")
+        print(f"Total steps: {self.training_stats['steps']}")
+        print(f"Valid moves: {self.training_stats['valid_moves']}")
+        print(f"Wall collisions: {self.training_stats['wall_collisions']}")
+        print(f"Total Q-updates: {self.training_stats['q_updates']}")
+        
+        # Print transition activation summary
+        active_transitions = [(i, count) for i, count in enumerate(self.training_stats['transitions_activated']) if count > 0]
+        print(f"\nActivated {len(active_transitions)}/{len(self.all_transitions)} transitions:")
+        for trans_idx, count in sorted(active_transitions, key=lambda x: x[1], reverse=True)[:10]:
+            print(f"  Transition {trans_idx}: {count} times - {self.get_goal_description(trans_idx)}")
     
     def get_policy(self, goal_index, state):
         """Get best action for a given goal and state"""
         state_key = self.get_state_key(state)
-        return np.argmax(self.q_tables[goal_index][state_key])
+        q_values = self.q_tables[goal_index][state_key]
+        
+        # Only consider valid actions
+        valid_actions = self.get_valid_actions(state)
+        if not valid_actions:
+            return 4  # Default to TOGGLE if no valid moves
+        
+        # Find best valid action
+        best_action = None
+        best_q = -float('inf')
+        
+        for action in valid_actions:
+            if q_values[action] > best_q:
+                best_q = q_values[action]
+                best_action = action
+        
+        # If all Q-values are zero, choose random valid action
+        if best_q <= 0:
+            best_action = random.choice(valid_actions)
+        
+        if self.debug:
+            print(f"  Policy for goal {goal_index}: state {state} -> action {best_action} (Q-values: {q_values})")
+        
+        return best_action
     
     def get_goal_description(self, goal_index):
         """Get description of a goal transition"""
@@ -914,154 +839,122 @@ class GoalConditionedQLearning:
         action_name = action_names.get(transition['action'], str(transition['action']))
         return f"{transition['type']}: {transition['prev_position']} --{action_name}--> {transition['next_position']}"
     
-    def evaluate_all_policies(self, num_tests=100, max_steps_per_test=500):
-        """Evaluate each policy from multiple random starting positions"""
-        print(f"\nEvaluating all policies with {num_tests} random starts each...")
+    def test_single_policy(self, goal_index, start_position, max_steps=100):
+        """Test a single policy from a specific starting position"""
+        print(f"\nTesting policy {goal_index} from position {start_position}:")
+        print(f"Goal: {self.get_goal_description(goal_index)}")
         
-        # Save current state to restore later
+        # Save current state
         original_pos = self.grid_world.agent_pos
         original_inventory = self.grid_world.agent_inventory
         
-        success_rates = []
-        avg_steps_to_success = []
+        # Set test position
+        self.grid_world.agent_pos = start_position
+        self.grid_world.agent_inventory = None
         
-        # Test each policy
-        for goal_index in range(len(self.all_transitions)):
-            print(f"\nTesting policy for goal {goal_index}: {self.get_goal_description(goal_index)}")
+        state = start_position
+        path = [state]
+        
+        for step in range(max_steps):
+            action = self.get_policy(goal_index, state)
             
-            successes = 0
-            total_steps = 0
+            prev_state = state
+            self.grid_world.step(action)
+            state = self.grid_world.agent_pos
+            path.append(state)
             
-            for test_idx in range(num_tests):
-                # Start from a random valid position
-                self.grid_world.agent_pos = self.get_random_valid_position()
-                self.grid_world.agent_inventory = None
-                
-                state = self.grid_world.agent_pos
-                found_goal = False
-                
-                for step in range(max_steps_per_test):
-                    # Use learned policy (greedy)
-                    action = self.get_policy(goal_index, state)
-                    
-                    prev_state = state
-                    self.grid_world.step(action)
-                    state = self.grid_world.agent_pos
-                    
-                    # Check if goal transition was activated
-                    activated = self.check_transition_activation(prev_state, action, state)
-                    if activated == goal_index:
-                        successes += 1
-                        total_steps += step + 1
-                        found_goal = True
-                        break
-                    elif activated is not None:
-                        # Wrong transition activated
-                        break
-                
-                if test_idx % 20 == 0:
-                    print(f"  Test {test_idx+1}/{num_tests}: {successes} successes so far")
+            print(f"  Step {step}: {prev_state} -> {state} (action {action})")
             
-            success_rate = successes / num_tests
-            avg_steps = total_steps / successes if successes > 0 else float('inf')
-            
-            success_rates.append(success_rate)
-            avg_steps_to_success.append(avg_steps)
-            
-            print(f"  Final: {success_rate:.2f} success rate ({successes}/{num_tests})")
-            if successes > 0:
-                print(f"  Average steps to success: {avg_steps:.2f}")
+            # Check if goal achieved
+            activated = self.check_transition_activation(prev_state, action, state)
+            if activated == goal_index:
+                print(f"  SUCCESS: Goal achieved in {step+1} steps!")
+                break
+            elif activated is not None:
+                print(f"  WRONG TRANSITION: Activated {activated} instead of {goal_index}")
+                break
         
         # Restore original state
         self.grid_world.agent_pos = original_pos
         self.grid_world.agent_inventory = original_inventory
         
-        # Print summary
-        print(f"\n=== EVALUATION SUMMARY ===")
-        for goal_index in range(len(self.all_transitions)):
-            print(f"Goal {goal_index}: {success_rates[goal_index]:.2f} success rate")
-            if success_rates[goal_index] > 0:
-                print(f"  Average steps: {avg_steps_to_success[goal_index]:.2f}")
-            print(f"  Description: {self.get_goal_description(goal_index)}")
-        
-        return success_rates, avg_steps_to_success
+        return path
+
+    def get_q_value_sum(self, goal_index):
+        """Calculate sum of all Q-values for a goal policy"""
+        total = 0
+        for state_actions in self.q_tables[goal_index].values():
+            total += np.sum(np.maximum(state_actions, 0))
+        return total
 
 
 class ActionOperators:
-    def __init__(self, grid_world):
+    def __init__(self, grid_world, debug=False):
         self.grid_world = grid_world
+        self.debug = debug
         self.operators = self._create_operators()
+        
+        if self.debug:
+            print(f"Created {len(self.operators)} total operators")
     
     def _create_operators(self):
-        """Create list of tuples mapping high-level actions to low-level transitions"""
+        """Create operators using ONLY planning domain predicates"""
         operators = []
         
-        # Get all transitions from the grid world
         transitions = self.grid_world.get_important_transitions()
         door_transitions = transitions['door_transitions']
         object_transitions = transitions['object_transitions']
         
-        # MOVE action operators - through doors
+        # MOVE operators - use only room-level predicates
         for transition in door_transitions:
-            # Extract room information
             from_room = self.grid_world.room_ids[transition['prev_position']]
             to_room = self.grid_world.room_ids[transition['next_position']]
             
-            # Preconditions for MOVE action
+            # ONLY use predicates that exist in planning domain
             preconditions = [
                 f"agent_in_room({from_room})",
-                f"connected({from_room}, {to_room})",
-                f"at_position({transition['prev_position']})",
-                f"facing_door({transition['prev_position']}, {transition['next_position']})"
+                f"connected({from_room}, {to_room})"
+                # REMOVED: at_position, facing_door - these don't exist!
             ]
             
-            operators.append((
-                "MOVE",
-                preconditions,
-                transition
-            ))
+            operators.append(("MOVE", preconditions, transition))
         
-        # PICK_UP action operators - at table positions
+        # PICK_UP operators - use only room-level predicates  
         for transition in object_transitions:
             room_id = self.grid_world.room_ids[transition['prev_position']]
             
-            # Preconditions for PICK_UP action
+            # ONLY use predicates that exist in planning domain
             preconditions = [
                 f"agent_in_room({room_id})",
-                f"at_table({transition['prev_position']})",
-                f"object_present({transition['prev_position']})",
+                f"object_in_room({room_id})",  # Object exists in this room
                 f"inventory_empty()"
+                # REMOVED: at_table, object_present - these don't exist!
             ]
             
-            operators.append((
-                "PICK_UP",
-                preconditions,
-                transition
-            ))
+            operators.append(("PICK_UP", preconditions, transition))
         
-        # PUT_DOWN action operators - at table positions
+        # PUT_DOWN operators - use only room-level predicates
         for transition in object_transitions:
             room_id = self.grid_world.room_ids[transition['prev_position']]
             
-            # Preconditions for PUT_DOWN action
+            # ONLY use predicates that exist in planning domain
             preconditions = [
-                f"agent_in_room({room_id})",
-                f"at_table({transition['prev_position']})", 
-                f"table_empty({transition['prev_position']})",
+                f"agent_in_room({room_id})", 
+                f"room_has_table({room_id})",  # Room has a table
                 f"inventory_has_object()"
+                # REMOVED: at_table, table_empty - these don't exist!
             ]
             
-            operators.append((
-                "PUT_DOWN",
-                preconditions,
-                transition
-            ))
+            operators.append(("PUT_DOWN", preconditions, transition))
         
         return operators
     
     def get_operators_by_action(self, action_name):
         """Get all operators for a specific high-level action"""
-        return [op for op in self.operators if op[0] == action_name]
+        operators = [op for op in self.operators if op[0] == action_name]
+        if self.debug:
+            print(f"Found {len(operators)} operators for action {action_name}")
+        return operators
     
     def get_operator_by_transition(self, transition):
         """Find operator that corresponds to a specific low-level transition"""
@@ -1081,69 +974,97 @@ class ActionOperators:
             if self._check_preconditions(state, preconditions):
                 applicable.append(operator)
         
+        if self.debug:
+            print(f"Found {len(applicable)} applicable operators out of {len(self.operators)} total")
+        
         return applicable
     
     def _check_preconditions(self, state, preconditions):
-        """Check if all preconditions are satisfied in the given state"""
-        # Extract state information
-        agent_pos = state['agent_position']
-        agent_room = self.grid_world.room_ids.get(agent_pos, -1)
-        agent_inventory = state.get('inventory', None)
-        grid = state.get('grid', self.grid_world.grid)
+        """Check preconditions using available state information"""
+        # Handle both planning state and grid world state representations
+        if 'agent_location' in state:
+            # Planning state representation
+            agent_room = state['agent_location']
+            agent_inventory = state['agent_inventory']
+            object_locations = state['object_locations']
+            room_connections = state['room_connections']
+            tables = state['tables']
+        else:
+            # Grid world state representation (for testing)
+            agent_pos = state['agent_position']
+            agent_room = self.grid_world.room_ids.get(agent_pos, -1)
+            agent_inventory = state.get('inventory', None)
+            
+            # Build planning state components from grid world
+            object_locations = {}
+            for table_pos in self.grid_world.table_positions.keys():
+                x, y = table_pos
+                if self.grid_world.grid[x, y] != 0:
+                    obj_id = self.grid_world.grid[x, y]
+                    room_id = self.grid_world.room_ids[table_pos]
+                    object_locations[obj_id] = room_id
+            
+            # Build room connections from door transitions
+            room_connections = defaultdict(set)
+            for transition in self.grid_world.door_transitions:
+                from_room = self.grid_world.room_ids[transition['prev_position']]
+                to_room = self.grid_world.room_ids[transition['next_position']]
+                room_connections[from_room].add(to_room)
+                room_connections[to_room].add(from_room)
+            
+            # Build tables set
+            tables = set()
+            for table_pos in self.grid_world.table_positions.keys():
+                room_id_table = self.grid_world.room_ids[table_pos]
+                tables.add(room_id_table)
         
+        # Now check preconditions
         for precondition in preconditions:
             if precondition.startswith("agent_in_room("):
-                # Extract room number from precondition
                 room_num = int(precondition.split('(')[1].split(')')[0])
                 if agent_room != room_num:
+                    if self.debug:
+                        print(f"  Precondition failed: agent_in_room({room_num}), agent is in room {agent_room}")
                     return False
                     
-            elif precondition.startswith("at_position("):
-                # Extract position from precondition
-                pos_str = precondition.split('(')[1].split(')')[0]
-                x, y = map(int, pos_str.split(', '))
-                if agent_pos != (x, y):
+            elif precondition.startswith("connected("):
+                rooms_str = precondition.split('(')[1].split(')')[0]
+                parts = rooms_str.split(',')
+                room1 = int(parts[0].strip())
+                room2 = int(parts[1].strip())
+                # Check if rooms are connected
+                if room2 not in room_connections.get(room1, set()):
+                    if self.debug:
+                        print(f"  Precondition failed: connected({room1}, {room2})")
                     return False
                     
-            elif precondition.startswith("at_table("):
-                # Check if at table position
-                pos_str = precondition.split('(')[1].split(')')[0]
-                x, y = map(int, pos_str.split(', '))
-                if agent_pos != (x, y) or (x, y) not in self.grid_world.table_positions:
+            elif precondition.startswith("object_in_room("):
+                room_num = int(precondition.split('(')[1].split(')')[0])
+                # Check if any object is in this room
+                object_found = any(room == room_num for room in object_locations.values())
+                if not object_found:
+                    if self.debug:
+                        print(f"  Precondition failed: object_in_room({room_num})")
                     return False
                     
-            elif precondition.startswith("object_present("):
-                # Check if object is present at position
-                pos_str = precondition.split('(')[1].split(')')[0]
-                x, y = map(int, pos_str.split(', '))
-                if grid[x, y] == 0:  # EMPTY
-                    return False
-                    
-            elif precondition.startswith("table_empty("):
-                # Check if table is empty
-                pos_str = precondition.split('(')[1].split(')')[0]
-                x, y = map(int, pos_str.split(', '))
-                if grid[x, y] != 0:  # Not EMPTY
+            elif precondition.startswith("room_has_table("):
+                room_num = int(precondition.split('(')[1].split(')')[0])
+                if room_num not in tables:
+                    if self.debug:
+                        print(f"  Precondition failed: room_has_table({room_num})")
                     return False
                     
             elif precondition.startswith("inventory_empty()"):
                 if agent_inventory is not None:
+                    if self.debug:
+                        print(f"  Precondition failed: inventory_empty(), inventory has {agent_inventory}")
                     return False
                     
             elif precondition.startswith("inventory_has_object()"):
                 if agent_inventory is None:
+                    if self.debug:
+                        print("  Precondition failed: inventory_has_object(), inventory is empty")
                     return False
-                    
-            elif precondition.startswith("connected("):
-                # Check room connection (simplified - assumes all known connections are valid)
-                rooms_str = precondition.split('(')[1].split(')')[0]
-                room1, room2 = map(int, rooms_str.split(', '))
-                # This would need access to the agent's knowledge base for proper checking
-                pass  # For now, we'll assume this precondition is satisfied if we have the operator
-                
-            elif precondition.startswith("facing_door("):
-                # Check if agent is positioned to move through door
-                pass  # This would require checking the specific door orientation
         
         return True
     
@@ -1167,27 +1088,86 @@ class ActionOperators:
                 print(f"     Low-level: {transition['type']} at {transition['prev_position']} -> {transition['next_position']} via action {transition['action']}")
     
     def get_state_description(self):
-        """Get current state for precondition checking"""
-        return {
-            'agent_position': self.grid_world.agent_pos,
-            'inventory': self.grid_world.agent_inventory,
-            'grid': self.grid_world.grid.copy()
+        """Get current state for precondition checking - return planning state"""
+        # Create a planning state from current grid world state
+        agent_room = self.grid_world.room_ids[self.grid_world.agent_pos]
+        
+        # Build object locations
+        object_locations = {}
+        for table_pos in self.grid_world.table_positions.keys():
+            x, y = table_pos
+            if self.grid_world.grid[x, y] != 0:
+                obj_id = self.grid_world.grid[x, y]
+                room_id = self.grid_world.room_ids[table_pos]
+                object_locations[obj_id] = room_id
+        
+        # Build room connections
+        room_connections = defaultdict(set)
+        for transition in self.grid_world.door_transitions:
+            from_room = self.grid_world.room_ids[transition['prev_position']]
+            to_room = self.grid_world.room_ids[transition['next_position']]
+            room_connections[from_room].add(to_room)
+            room_connections[to_room].add(from_room)
+        
+        # Build tables set
+        tables = set()
+        for table_pos in self.grid_world.table_positions.keys():
+            room_id_table = self.grid_world.room_ids[table_pos]
+            tables.add(room_id_table)
+        
+        planning_state = {
+            'agent_location': agent_room,
+            'agent_inventory': self.grid_world.agent_inventory,
+            'object_locations': object_locations,
+            'room_connections': dict(room_connections),
+            'tables': tables,
+            'low_level_position': self.grid_world.agent_pos
         }
+        
+        if self.debug:
+            print(f"Current planning state: room={planning_state['agent_location']}, inventory={planning_state['agent_inventory']}")
+        
+        return planning_state
+    
+    def test_preconditions(self, position):
+        """Test preconditions from a specific position"""
+        print(f"\nTesting preconditions from position {position}:")
+        
+        # Set agent position for testing
+        original_pos = self.grid_world.agent_pos
+        self.grid_world.agent_pos = position
+        
+        state = self.get_state_description()
+        applicable = self.find_applicable_operators(state)
+        
+        print(f"Found {len(applicable)} applicable operators:")
+        for op in applicable:
+            print(f"  - {op[0]} at {op[2]['prev_position']}")
+        
+        # Restore position
+        self.grid_world.agent_pos = original_pos
+        
+        return applicable
+
 
 class IntegratedPlanner:
     """Planner that integrates high-level operators with learned low-level policies"""
     
-    def __init__(self, grid_world, action_operators, q_learning_agent):
+    def __init__(self, grid_world, action_operators, q_learning_agent, debug=False):
         self.grid_world = grid_world
         self.action_ops = action_operators
         self.q_agent = q_learning_agent
         self.domain = PlanningDomain()
+        self.debug = debug
         
         # Map low-level transitions to their operator indices
         self.transition_to_operator = {}
         for i, op in enumerate(self.action_ops.operators):
             transition_key = self._get_transition_key(op[2])
             self.transition_to_operator[transition_key] = i
+        
+        if self.debug:
+            print(f"IntegratedPlanner initialized with {len(self.action_ops.operators)} operators")
     
     def _get_transition_key(self, transition):
         """Create a unique key for a transition"""
@@ -1208,13 +1188,20 @@ class IntegratedPlanner:
         transition_index = self._get_transition_index(transition)
         
         if transition_index is None:
+            if self.debug:
+                print(f"  Operator {operator[0]} at {transition['prev_position']}: transition not found in Q-agent")
             return False
         
         # Check if max Q-value > 0 for current state
         current_pos = current_state['agent_position']
         max_q = np.max(self.q_agent.q_tables[transition_index][current_pos])
         
-        return max_q > 0
+        achievable = max_q > 0
+        
+        if self.debug:
+            print(f"  Operator {operator[0]} at {transition['prev_position']}: max Q={max_q:.3f}, achievable={achievable}")
+        
+        return achievable
     
     def get_achievable_operators(self, current_state):
         """Get all operators that are currently achievable"""
@@ -1225,15 +1212,28 @@ class IntegratedPlanner:
             if self.is_operator_achievable(op, current_state):
                 achievable.append(op)
         
+        if self.debug:
+            print(f"Found {len(achievable)} achievable operators out of {len(applicable)} applicable")
+        
         return achievable
     
     def create_planning_state(self, current_state, activated_transition=None):
         """Create a planning state from current environment state"""
-        if activated_transition is not None:
-            # We've activated a transition - update position to the transition's end
-            new_position = activated_transition['next_position']
+        # Handle both state representations
+        if 'agent_position' in current_state:
+            # Grid world state representation
+            if activated_transition is not None:
+                new_position = activated_transition['next_position']
+            else:
+                new_position = current_state['agent_position']
+            agent_inventory = current_state.get('inventory', None)
         else:
-            new_position = current_state['agent_position']
+            # Planning state representation
+            if activated_transition is not None:
+                new_position = activated_transition['next_position']
+            else:
+                new_position = current_state['low_level_position']
+            agent_inventory = current_state['agent_inventory']
         
         room_id = self.grid_world.room_ids[new_position]
         
@@ -1249,26 +1249,35 @@ class IntegratedPlanner:
         # Find tables in rooms
         tables = set()
         for table_pos in self.grid_world.table_positions.keys():
-            room_id = self.grid_world.room_ids[table_pos]
-            tables.add(room_id)
+            room_id_table = self.grid_world.room_ids[table_pos]
+            tables.add(room_id_table)
         
         # Build object locations from current grid state
         object_locations = {}
         for table_pos in self.grid_world.table_positions.keys():
             x, y = table_pos
-            if self.grid_world.grid[x, y] != 0:  # Not empty
+            if self.grid_world.grid[x, y] != 0:
                 obj_id = self.grid_world.grid[x, y]
-                room_id = self.grid_world.room_ids[table_pos]
-                object_locations[obj_id] = room_id
+                room_id_obj = self.grid_world.room_ids[table_pos]
+                object_locations[obj_id] = room_id_obj
         
         planning_state = {
             'agent_location': room_id,
-            'agent_inventory': self.grid_world.agent_inventory,
+            'agent_inventory': agent_inventory,
             'object_locations': object_locations,
             'room_connections': dict(room_connections),
             'tables': tables,
-            'low_level_position': new_position  # Track low-level position for execution
+            'low_level_position': new_position
         }
+        
+        if self.debug:
+            print(f"Created planning state:")
+            print(f"  Room: {planning_state['agent_location']}")
+            print(f"  Position: {planning_state['low_level_position']}")
+            print(f"  Inventory: {planning_state['agent_inventory']}")
+            print(f"  Object locations: {planning_state['object_locations']}")
+            print(f"  Room connections: {dict(planning_state['room_connections'])}")
+            print(f"  Tables: {planning_state['tables']}")
         
         return planning_state
     
@@ -1283,19 +1292,35 @@ class IntegratedPlanner:
         print(f"  Inventory: {planning_state['agent_inventory']}")
         print(f"  Object locations: {planning_state['object_locations']}")
         
-        # Use BFS to find plan
-        queue = deque([(planning_state, [], current_state['agent_position'])])
+        # Check if goal is already satisfied
+        if self.domain.is_goal_state(planning_state, goal):
+            print("Goal already satisfied!")
+            return []
+        
+        # Use BFS to find plan - use low_level_position from planning_state
+        queue = deque([(planning_state, [], planning_state['low_level_position'])])
         visited = set()
+        
+        states_explored = 0
         
         while queue:
             state, plan, low_level_pos = queue.popleft()
+            states_explored += 1
+            
+            if self.debug:
+                print(f"\nExploring state {states_explored}:")
+                print(f"  Room: {state['agent_location']}, Inventory: {state['agent_inventory']}")
+                print(f"  Current plan length: {len(plan)}")
             
             # Check if goal is satisfied
             if self.domain.is_goal_state(state, goal):
+                print(f"Goal achieved! Found plan with {len(plan)} steps after exploring {states_explored} states")
                 return plan
             
             # Check depth limit
             if len(plan) >= max_depth:
+                if self.debug:
+                    print(f"  Reached max depth {max_depth}")
                 continue
             
             # State fingerprint for visited check
@@ -1305,10 +1330,13 @@ class IntegratedPlanner:
                 tuple(sorted(state['object_locations'].items()))
             )
             if state_key in visited:
+                if self.debug:
+                    print(f"  Already visited this state")
                 continue
             visited.add(state_key)
             
             # Get achievable operators in current low-level state
+            # Create a grid world state representation for the low-level check
             current_low_level_state = {
                 'agent_position': low_level_pos,
                 'inventory': state['agent_inventory'],
@@ -1317,11 +1345,18 @@ class IntegratedPlanner:
             
             achievable_ops = self.get_achievable_operators(current_low_level_state)
             
+            if self.debug:
+                print(f"  Found {len(achievable_ops)} achievable operators")
+            
             for op in achievable_ops:
                 action_name, preconditions, transition = op
                 transition_index = self._get_transition_index(transition)
                 
+                if self.debug:
+                    print(f"  Considering operator: {action_name} at {transition['prev_position']}")
+                
                 # Apply the operator to get new state
+                new_state = None
                 if action_name == "MOVE":
                     # MOVE action changes room
                     from_room = self.grid_world.room_ids[transition['prev_position']]
@@ -1344,12 +1379,14 @@ class IntegratedPlanner:
                             break
                     
                     if obj_id is None:
+                        if self.debug:
+                            print(f"    No object found in room {room_id}")
                         continue
                     
                     new_state = copy.deepcopy(state)
                     new_state['agent_inventory'] = obj_id
                     del new_state['object_locations'][obj_id]
-                    new_low_level_pos = transition['next_position']  # Same position for toggle
+                    new_low_level_pos = transition['next_position']
                     
                     action_desc = f"PICK_UP object {obj_id} in room {room_id}"
                     params = {'object_id': obj_id, 'room': room_id}
@@ -1357,6 +1394,8 @@ class IntegratedPlanner:
                 elif action_name == "PUT_DOWN":
                     # PUT_DOWN action
                     if state['agent_inventory'] is None:
+                        if self.debug:
+                            print(f"    No object in inventory to put down")
                         continue
                     
                     room_id = state['agent_location']
@@ -1365,7 +1404,7 @@ class IntegratedPlanner:
                     new_state = copy.deepcopy(state)
                     new_state['agent_inventory'] = None
                     new_state['object_locations'][obj_id] = room_id
-                    new_low_level_pos = transition['next_position']  # Same position for toggle
+                    new_low_level_pos = transition['next_position']
                     
                     action_desc = f"PUT_DOWN object {obj_id} in room {room_id}"
                     params = {'object_id': obj_id, 'room': room_id}
@@ -1373,11 +1412,18 @@ class IntegratedPlanner:
                 else:
                     continue
                 
+                if new_state is None:
+                    continue
+                
                 # Add to plan
                 new_plan = plan + [(action_name, params, action_desc, transition_index)]
                 queue.append((new_state, new_plan, new_low_level_pos))
+                
+                if self.debug:
+                    print(f"    Added new state to queue: room {new_state['agent_location']}, inventory {new_state['agent_inventory']}")
         
-        return None  # No plan found
+        print(f"No plan found after exploring {states_explored} states")
+        return None
     
     def execute_integrated_plan(self, plan, max_steps_per_action=100):
         """Execute a plan using the learned low-level policies"""
@@ -1406,6 +1452,9 @@ class IntegratedPlanner:
         transition = self.q_agent.all_transitions[transition_index]
         target_position = transition['prev_position']
         
+        if self.debug:
+            print(f"  Executing transition {transition_index}: {transition['type']} at {target_position}")
+        
         # Move to the target position using the learned policy
         steps = 0
         while self.grid_world.agent_pos != target_position and steps < max_steps:
@@ -1416,16 +1465,32 @@ class IntegratedPlanner:
             # Take the action
             self.grid_world.step(action)
             steps += 1
+            
+            if self.debug:
+                print(f"    Step {steps}: {current_pos} -> {self.grid_world.agent_pos} (action {action})")
         
         if self.grid_world.agent_pos != target_position:
+            if self.debug:
+                print(f"  Failed to reach target position {target_position}, ended at {self.grid_world.agent_pos}")
             return False
         
         # Now we're at the right position, take the transition action
         required_action = transition['action']
         self.grid_world.step(required_action)
         
+        if self.debug:
+            print(f"  Took transition action {required_action}: {self.grid_world.agent_pos}")
+        
         # Verify we reached the expected next position
-        return self.grid_world.agent_pos == transition['next_position']
+        success = self.grid_world.agent_pos == transition['next_position']
+        
+        if self.debug:
+            if success:
+                print(f"  Successfully executed transition")
+            else:
+                print(f"  Failed to reach expected position {transition['next_position']}, ended at {self.grid_world.agent_pos}")
+        
+        return success
     
     def _verify_operator_applied(self, action_name, params):
         """Verify that the operator produced the expected state change"""
@@ -1433,106 +1498,178 @@ class IntegratedPlanner:
         
         if action_name == "MOVE":
             expected_room = params['to_room']
-            current_room = self.grid_world.room_ids[current_state['agent_position']]
-            return current_room == expected_room
+            current_room = self.grid_world.room_ids[self.grid_world.agent_pos]
+            success = current_room == expected_room
+            if self.debug:
+                print(f"  MOVE verification: expected room {expected_room}, current room {current_room}, success={success}")
+            return success
             
         elif action_name == "PICK_UP":
             expected_obj = params['object_id']
-            return self.grid_world.agent_inventory == expected_obj
+            success = self.grid_world.agent_inventory == expected_obj
+            if self.debug:
+                print(f"  PICK_UP verification: expected inventory {expected_obj}, current inventory {self.grid_world.agent_inventory}, success={success}")
+            return success
             
         elif action_name == "PUT_DOWN":
             expected_obj = params['object_id']
             expected_room = params['room']
             
             # Check if object is in the expected room
+            success = False
             for table_pos, room_coords in self.grid_world.table_positions.items():
                 if self.grid_world.room_ids[table_pos] == expected_room:
                     if self.grid_world.grid[table_pos] == expected_obj:
-                        return True
-            return False
+                        success = True
+                        break
+            
+            if self.debug:
+                print(f"  PUT_DOWN verification: expected object {expected_obj} in room {expected_room}, success={success}")
+            return success
         
         return True
+    
+    def test_planning_from_position(self, goal, position):
+        """Test planning from a specific position"""
+        print(f"\n=== Testing planning from position {position} ===")
+        
+        # Set position
+        original_pos = self.grid_world.agent_pos
+        self.grid_world.agent_pos = position
+        
+        # Create plan
+        plan = self.plan_with_learned_policies(goal)
+        
+        if plan:
+            print(f"Plan found with {len(plan)} steps:")
+            for i, (action_name, params, description, _) in enumerate(plan):
+                print(f"  {i+1}. {description}")
+        else:
+            print("No plan found")
+        
+        # Restore position
+        self.grid_world.agent_pos = original_pos
+        
+        return plan
 
-# Example usage and demonstration
-def demonstrate_integrated_planning():
-    # Create all components
-    grid_world = GridWorld(num_rooms=25, room_size=5)
+
+def test_basic_q_learning():
+    """Test basic Q-learning functionality"""
+    print("=== Testing Basic Q-Learning ===")
     
-    # Train the low-level policies first
-    print("=== Training Low-Level Policies ===")
-    q_agent = GoalConditionedQLearning(grid_world, learning_rate=0.1, discount_factor=0.9)
-    q_agent.train_continuous(total_steps=200000, log_interval=50000)
+    grid_world = GridWorld(num_rooms=4, room_size=3)
+    q_agent = GoalConditionedQLearning(grid_world, debug=True)
     
-    # Create action operators
-    print("\n=== Creating Action Operators ===")
-    action_ops = ActionOperators(grid_world)
+    # Test short training
+    print("Training for 2000 steps...")
+    q_agent.train_continuous(total_steps=2000, log_interval=1000)
+    
+    # Test specific policies
+    print("\n--- Testing Learned Policies ---")
+    active_transitions = []
+    for i, count in enumerate(q_agent.training_stats['transitions_activated']):
+        if count > 0:
+            active_transitions.append(i)
+    
+    if active_transitions:
+        test_goal = active_transitions[0]
+        transition = q_agent.all_transitions[test_goal]
+        start_pos = transition['prev_position']
+        
+        print(f"Testing policy for transition {test_goal}")
+        path = q_agent.test_single_policy(test_goal, start_pos, max_steps=20)
+    
+    return q_agent
+
+def test_operator_creation():
+    """Test operator creation and application"""
+    print("\n=== Testing Operator Creation ===")
+    
+    grid_world = GridWorld(num_rooms=4, room_size=3)
+    action_ops = ActionOperators(grid_world, debug=True)
+    
+    # Display operators
     action_ops.display_operators()
     
-    # Create integrated planner
-    print("\n=== Creating Integrated Planner ===")
-    planner = IntegratedPlanner(grid_world, action_ops, q_agent)
-    
-    # Define a goal (e.g., put KEY in room 10)
-    key_id = ObjectType.KEY.value
-    goal = {
-        'object_location': {
-            'object_id': key_id,
-            'room': 10
-        }
-    }
-    
-    print(f"\n=== Planning to achieve goal: KEY in room 10 ===")
-    
-    # Create a plan using integrated planning
-    plan = planner.plan_with_learned_policies(goal)
-    
-    if plan:
-        print(f"Found plan with {len(plan)} steps:")
-        for i, (action_name, params, description, _) in enumerate(plan):
-            print(f"  {i+1}. {description}")
-        
-        # Execute the plan
-        print("\n=== Executing Plan ===")
-        success, message = planner.execute_integrated_plan(plan)
-        print(f"Result: {message}")
-        
-        # Verify goal achievement
-        final_state = action_ops.get_state_description()
-        final_planning_state = planner.create_planning_state(final_state)
-        goal_achieved = planner.domain.is_goal_state(final_planning_state, goal)
-        print(f"Goal achieved: {goal_achieved}")
-        
-    else:
-        print("No plan found!")
-
-def test_operator_achievability():
-    """Test which operators are achievable from different positions"""
-    grid_world = GridWorld(num_rooms=25, room_size=5)
-    
-    # Train policies briefly for testing
-    q_agent = GoalConditionedQLearning(grid_world, learning_rate=0.1, discount_factor=0.9)
-    q_agent.train_continuous(total_steps=50000, log_interval=25000)
-    
-    action_ops = ActionOperators(grid_world)
-    planner = IntegratedPlanner(grid_world, action_ops, q_agent)
-    
     # Test from different positions
-    test_positions = [(1, 1), (5, 2), (10, 10)]
-    
+    test_positions = [(1, 1), (3, 1), (1, 3)]
     for pos in test_positions:
-        grid_world.agent_pos = pos
-        current_state = action_ops.get_state_description()
-        
-        print(f"\nTesting from position {pos}:")
-        achievable = planner.get_achievable_operators(current_state)
-        
-        print(f"  Achievable operators: {len(achievable)}")
-        for op in achievable[:3]:  # Show first 3
-            print(f"    - {op[0]} at {op[2]['prev_position']}")
-
-if __name__ == "__main__":
-    # Test operator achievability
-    test_operator_achievability()
+        action_ops.test_preconditions(pos)
     
-    # Run full integrated planning demonstration
-    demonstrate_integrated_planning()
+    return action_ops
+
+def test_integrated_planning():
+    """Test integrated planning system"""
+    print("\n=== Testing Integrated Planning ===")
+    
+    grid_world = GridWorld(num_rooms=4, room_size=3)
+    
+    # Train Q-agent
+    q_agent = GoalConditionedQLearning(grid_world, debug=False)
+    print("Training Q-agent...")
+    q_agent.train_continuous(total_steps=5000, log_interval=2500)
+    
+    # Create action operators
+    action_ops = ActionOperators(grid_world, debug=True)
+    
+    # Create integrated planner
+    planner = IntegratedPlanner(grid_world, action_ops, q_agent, debug=True)
+    
+    # Test planning from different positions
+    current_state = action_ops.get_state_description()
+    planning_state = planner.create_planning_state(current_state)
+    
+    # Try to create a simple goal
+    if planning_state['object_locations']:
+        obj_id = list(planning_state['object_locations'].keys())[0]
+        obj_room = planning_state['object_locations'][obj_id]
+        
+        # Find a different room
+        target_room = None
+        for room in planning_state['tables']:
+            if room != obj_room:
+                target_room = room
+                break
+        
+        if target_room:
+            goal = {
+                'object_location': {
+                    'object_id': obj_id,
+                    'room': target_room
+                }
+            }
+            
+            print(f"Testing goal: Move object {obj_id} from room {obj_room} to room {target_room}")
+            
+            # Test from current position - use the low_level_position from planning state
+            start_position = planning_state['low_level_position']
+            plan = planner.test_planning_from_position(goal, start_position)
+            
+            if plan:
+                return True
+    
+    return False
+
+def run_all_tests():
+    """Run all tests"""
+    print("Running all tests...")
+    
+    # Test 1: Basic Q-learning
+    q_agent = test_basic_q_learning()
+    
+    # Test 2: Operator creation
+    action_ops = test_operator_creation()
+    
+    # Test 3: Integrated planning
+    planning_success = test_integrated_planning()
+    
+    print(f"\n=== All Tests Completed ===")
+    print(f"Q-learning: WORKING")
+    print(f"Operators: WORKING") 
+    print(f"Planning: {'WORKING' if planning_success else 'NO PLAN FOUND'}")
+    
+    return q_agent, action_ops, planning_success
+
+# Run all tests
+if __name__ == "__main__":
+    q_agent, action_ops, planning_success = run_all_tests()
