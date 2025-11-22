@@ -672,7 +672,7 @@ class LearningAgent(Agent):
         }
     
 # Create environment and agent
-grid_world = GridWorld(num_rooms=4, room_size=3, debug=False)
+grid_world = GridWorld(num_rooms=49, room_size=5, debug=False)
 print(grid_world.grid)
 agent = LearningAgent(grid_world)
 
