@@ -9,10 +9,12 @@ import copy
 
 class ObjectType(Enum):
     EMPTY = 0
-    KEY = 2
-    TREASURE = 3
-    FOOD = 3
-    TOOL = 4
+    A = 2
+    B = 3
+    C = 3
+    D = 4
+    E = 5
+    F = 6
 
 class ActionType(Enum):
     MOVE = 0
@@ -87,7 +89,6 @@ class GridWorld:
                     room_centers.append((center_x, center_y))
         
         # Shuffle room centers to assign objects randomly
-        print(room_centers)
         random.shuffle(room_centers)
         
         # First, ensure at least one of each object type
@@ -108,7 +109,6 @@ class GridWorld:
                 
                 self.room_ids[(x, y)] = room_id
                 mat[x, y] = room_id
-        print(mat)
                 
     
     def _precompute_transitions(self):
@@ -237,9 +237,6 @@ class Agent:
         current_room = state['room_id']
         
         
-        # Update room tracking
-        self.knowledge_base['previous_room'] = current_room
-        
         # Mark current room as known
         self.knowledge_base['known_rooms'].add(current_room)
         
@@ -266,6 +263,9 @@ class Agent:
         
         # Update previous inventory for next comparison
         self.knowledge_base['previous_inventory'] = current_inventory
+
+        # Update room tracking
+        self.knowledge_base['previous_room'] = current_room
     
     def step(self, action):
         """Take an action and update knowledge"""
@@ -672,9 +672,8 @@ class LearningAgent(Agent):
         }
     
 # Create environment and agent
-grid_world = GridWorld(num_rooms=49, room_size=5, debug=False)
-print(grid_world.grid)
+grid_world = GridWorld(num_rooms=64, room_size=5, debug=False)
 agent = LearningAgent(grid_world)
 
 # Use simple count-based exploration
-agent.explore_count_based(num_steps=100000, log_interval=20000)
+agent.explore_count_based(num_steps=500000, log_interval=20000)
