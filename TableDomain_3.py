@@ -144,15 +144,15 @@ class GridWorld:
                         'type': 'door'
                     })
                 
-                # From the door position to below the door (DOWN action)
+
                 prev_pos = (wall_row, door_col)
                 next_pos = (wall_row + 1, door_col)
                 if (prev_pos[0] >= 0 and next_pos[0] < self.grid_size and 
                     self.room_ids.get(prev_pos, -1) != self.room_ids.get(next_pos, -2)):
                     self.door_transitions.append({
-                        'prev_position': prev_pos,
-                        'action': 1,  # DOWN
-                        'next_position': next_pos,
+                        'prev_position': next_pos,
+                        'action': 0,  # DOWN
+                        'next_position': prev_pos,
                         'type': 'door'
                     })
         
@@ -183,9 +183,9 @@ class GridWorld:
                 if (prev_pos[1] >= 0 and next_pos[1] < self.grid_size and 
                     self.room_ids.get(prev_pos, -1) != self.room_ids.get(next_pos, -2)):
                     self.door_transitions.append({
-                        'prev_position': prev_pos,
-                        'action': 3,  # RIGHT
-                        'next_position': next_pos,
+                        'prev_position': next_pos,
+                        'action': 2,  # RIGHT
+                        'next_position': prev_pos,
                         'type': 'door'
                     })
         
@@ -1859,7 +1859,7 @@ class ComprehensiveTester:
             grid_world = GridWorld(num_rooms=4, room_size=3)
             
             q_agent = GoalConditionedQLearning(grid_world, debug=False)
-            q_agent.train_continuous(total_steps=2000, log_interval=2000)
+            q_agent.train_continuous(total_steps=100000, log_interval=20000)
             
             action_ops = ActionOperators(grid_world, debug=False)
             planner = IntegratedPlanner(grid_world, action_ops, q_agent, debug=False)
