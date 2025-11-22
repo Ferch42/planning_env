@@ -14,6 +14,11 @@ class ObjectType(Enum):
     FOOD = 3
     TOOL = 4
 
+class ActionType(Enum):
+    MOVE = 0
+    PICK_UP = 1
+    PUT_DOWN = 2
+
 class GridWorld:
     def __init__(self, num_rooms=4, room_size=3, debug=False):
         self.num_rooms = num_rooms
@@ -270,15 +275,8 @@ class Agent:
         self._update_knowledge()
     
 
-
-class ActionType(Enum):
-    MOVE = 0
-    PICK_UP = 1
-    PUT_DOWN = 2
-
-
 class PlanningDomain:
-    """Fixed planning domain with corrected action logic"""
+    """Planning domain using the agent's knowledge base as state representation"""
     
     def __init__(self):
         self.actions = {
@@ -291,99 +289,116 @@ class PlanningDomain:
         """Get all available action types"""
         return list(self.actions.keys())
     
-    def _move_action(self, state, from_room, to_room):
-        """Move action: agent moves between connected rooms"""
-        if state['agent_location'] != from_room:
-            return None, f"Agent not in room {from_room} (currently in {state['agent_location']})"
+    def _move_action(self, kb_state, from_room, to_room):
+        """Move action: agent moves between connected rooms based on knowledge"""
+        current_room = kb_state['current_room']
+        if current_room != from_room:
+            return None, f"Agent not in room {from_room} (currently in {current_room})"
             
-        if to_room not in state['room_connections'].get(from_room, set()):
-            return None, f"Rooms {from_room} and {to_room} are not connected"
+        # Check if connection exists in knowledge base
+        connection = tuple(sorted([from_room, to_room]))
+        if connection not in kb_state['room_connections']:
+            return None, f"Rooms {from_room} and {to_room} are not known to be connected"
             
-        new_state = copy.deepcopy(state)
-        new_state['agent_location'] = to_room
+        new_state = copy.deepcopy(kb_state)
+        new_state['current_room'] = to_room
+        new_state['known_rooms'].add(to_room)
         return new_state, f"Moved from room {from_room} to room {to_room}"
     
-    def _pick_up_action(self, state, object_id, room):
-        """Pick up action: agent picks up object from table in current room"""
-        if state['agent_location'] != room:
-            return None, f"Agent not in room {room} (currently in {state['agent_location']})"
+    def _pick_up_action(self, kb_state, object_type, room):
+        """Pick up action: agent picks up object from current room based on knowledge"""
+        current_room = kb_state['current_room']
+        if current_room != room:
+            return None, f"Agent not in room {room} (currently in {current_room})"
             
-        if state['agent_inventory'] is not None:
-            return None, f"Agent already holding object {state['agent_inventory']}"
+        if kb_state['inventory'] is not None:
+            return None, f"Agent already holding object {kb_state['inventory']}"
             
-        if object_id not in state['object_locations']:
-            return None, f"Object {object_id} location unknown"
+        # Check if object is known to be in this room
+        if (room, object_type) not in kb_state['object_locations']:
+            return None, f"Object {object_type} not known to be in room {room}"
             
-        if state['object_locations'][object_id] != room:
-            return None, f"Object {object_id} not in room {room} (it's in room {state['object_locations'][object_id]})"
-            
-        new_state = copy.deepcopy(state)
-        new_state['agent_inventory'] = object_id
-        del new_state['object_locations'][object_id]
-        return new_state, f"Picked up object {object_id} in room {room}"
+        new_state = copy.deepcopy(kb_state)
+        new_state['inventory'] = object_type
+        new_state['object_locations'].remove((room, object_type))
+        return new_state, f"Picked up object {object_type} in room {room}"
     
-    def _put_down_action(self, state, object_id, room):
-        """Put down action: agent puts object on table in current room"""
-        if state['agent_location'] != room:
+    def _put_down_action(self, kb_state, object_type, room):
+        """Put down action: agent puts object in current room based on knowledge"""
+        current_room = kb_state['current_room']
+        if current_room != room:
             return None, f"Agent not in room {room}"
             
-        if state['agent_inventory'] != object_id:
-            return None, f"Agent not holding object {object_id} (holding {state['agent_inventory']})"
+        if kb_state['inventory'] != object_type:
+            return None, f"Agent not holding object {object_type} (holding {kb_state['inventory']})"
             
-        if room not in state['tables']:
-            return None, f"No table in room {room} to put object on"
-            
-        new_state = copy.deepcopy(state)
-        new_state['agent_inventory'] = None
-        new_state['object_locations'][object_id] = room
-        return new_state, f"Put down object {object_id} in room {room}"
+        new_state = copy.deepcopy(kb_state)
+        new_state['inventory'] = None
+        new_state['object_locations'].add((room, object_type))
+        return new_state, f"Put down object {object_type} in room {room}"
     
-    def apply_action(self, state, action_type, **params):
-        """Apply an action to a state and return new state"""
+    def apply_action(self, kb_state, action_type, **params):
+        """Apply an action to a knowledge base state and return new state"""
         if action_type not in self.actions:
             return None, f"Unknown action type: {action_type}"
             
-        return self.actions[action_type](state, **params)
+        return self.actions[action_type](kb_state, **params)
     
-    def get_applicable_actions(self, state):
-        """Get all applicable actions in current state"""
+    def get_applicable_actions(self, kb_state):
+        """Get all applicable actions in current knowledge base state"""
         applicable = []
+        current_room = kb_state['current_room']
         
-        # Move actions
-        current_room = state['agent_location']
-        for connected_room in state['room_connections'].get(current_room, set()):
-            applicable.append((ActionType.MOVE, {
-                'from_room': current_room,
-                'to_room': connected_room
-            }))
+        # Move actions to connected rooms
+        for connection in kb_state['room_connections']:
+            if current_room in connection:
+                other_room = connection[0] if connection[1] == current_room else connection[1]
+                applicable.append((ActionType.MOVE, {
+                    'from_room': current_room,
+                    'to_room': other_room
+                }))
         
-        # Pick up actions
-        if state['agent_inventory'] is None:
-            for obj_id, obj_room in state['object_locations'].items():
-                if obj_room == current_room:
+        # Pick up actions for objects in current room
+        if kb_state['inventory'] is None:
+            for room, obj_type in kb_state['object_locations']:
+                if room == current_room:
                     applicable.append((ActionType.PICK_UP, {
-                        'object_id': obj_id,
+                        'object_type': obj_type,
                         'room': current_room
                     }))
         
-        # Put down action
-        if state['agent_inventory'] is not None and current_room in state['tables']:
+        # Put down action (can put down in any room)
+        if kb_state['inventory'] is not None:
             applicable.append((ActionType.PUT_DOWN, {
-                'object_id': state['agent_inventory'],
+                'object_type': kb_state['inventory'],
                 'room': current_room
             }))
         
         return applicable
     
-    def is_goal_state(self, state, goal):
-        """Check if state satisfies goal condition"""
+    def is_goal_state(self, kb_state, goal):
+        """Check if knowledge base state satisfies goal condition"""
         if 'object_location' in goal:
-            obj_id = goal['object_location']['object_id']
+            obj_type = goal['object_location']['object_type']
             target_room = goal['object_location']['room']
-            return (obj_id in state['object_locations'] and 
-                   state['object_locations'][obj_id] == target_room)
+            return (target_room, obj_type) in kb_state['object_locations']
+        
+        if 'inventory_contains' in goal:
+            return kb_state['inventory'] == goal['inventory_contains']
+            
         return False
-
+    
+    def convert_to_kb_state(self, agent):
+        """Convert agent's knowledge base to planning state representation"""
+        current_state = agent.grid_world.get_state()
+        
+        return {
+            'current_room': current_state['room_id'],
+            'inventory': current_state['inventory'],
+            'known_rooms': copy.deepcopy(agent.knowledge_base['known_rooms']),
+            'room_connections': copy.deepcopy(agent.knowledge_base['room_connections']),
+            'object_locations': copy.deepcopy(agent.knowledge_base['object_locations'])
+        }
 
 class Planner:
     """Fixed planner with better goal checking and plan validation"""
