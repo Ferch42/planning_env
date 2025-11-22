@@ -29,8 +29,7 @@ class GridWorld:
         self.table_positions = {}
         self.room_ids = {}  # Maps position to room ID
         
-        # Initialize agent at position (1,1)
-        self.agent_pos = (1, 1)
+        self.agent_pos = (0,0)
         self.agent_inventory = None
         
         # Precompute important transitions
@@ -93,102 +92,36 @@ class GridWorld:
     
     def _assign_room_ids(self):
         """Assign room IDs to all positions in the grid"""
+        mat = np.zeros((self.grid_size, self.grid_size), dtype=int)
         for x in range(self.grid_size):
             for y in range(self.grid_size):
                 # Calculate which room this position belongs to
                 room_x = x // (self.room_size + 1)
                 room_y = y // (self.room_size + 1)
-                room_id = room_x + room_y * self.rooms_per_side 
+                room_id = room_x + room_y * (self.rooms_per_side) 
                 
-                # Check if position is a wall
-                is_wall = False
-                for i in range(1, self.rooms_per_side):
-                    wall_pos = i * (self.room_size + 1) - 1
-                    if x == wall_pos or y == wall_pos:
-                        is_wall = True
-                        break
+                self.room_ids[(x, y)] = room_id
+                mat[x, y] = room_id
+        print(mat)
                 
-                if not is_wall:
-                    self.room_ids[(x, y)] = room_id
-                else:
-                    # For walls, assign to adjacent room
-                    if x % (self.room_size + 1) == self.room_size:
-                        room_x = x // (self.room_size + 1)
-                    if y % (self.room_size + 1) == self.room_size:
-                        room_y = y // (self.room_size + 1)
-                    room_id = room_x + room_y * self.rooms_per_side
-                    self.room_ids[(x, y)] = room_id
     
     def _precompute_transitions(self):
-        """Precompute all possible door and object transitions"""
-        door_pos = self.room_size // 2
-        
+        """Precompute all possible door and object transitions"""        
         # Horizontal doors (vertical walls)
-        for i in range(1, self.rooms_per_side):
-            wall_row = i * (self.room_size + 1) - 1
-            for j in range(self.rooms_per_side):
-                door_col = j * (self.room_size + 1) + door_pos
-                
-                if door_col >= self.grid_size:
-                    continue
-                
-                # From above the door to the door position (DOWN action)
-                prev_pos = (wall_row - 1, door_col)
-                next_pos = (wall_row, door_col)
-                if (prev_pos[0] >= 0 and next_pos[0] < self.grid_size and 
-                    self.room_ids.get(prev_pos, -1) != self.room_ids.get(next_pos, -2)):
-                    self.door_transitions.append({
-                        'prev_position': prev_pos,
-                        'action': 1,  # DOWN
-                        'next_position': next_pos,
-                        'type': 'door'
-                    })
-                
+        for i in range(self.grid_size):
+            for j in range(self.grid_size):
+                for a in range(4):
+                    prev_pos = (i,j)
+                    next_pos = self.step_2(a, i,j)
 
-                prev_pos = (wall_row, door_col)
-                next_pos = (wall_row + 1, door_col)
-                if (prev_pos[0] >= 0 and next_pos[0] < self.grid_size and 
-                    self.room_ids.get(prev_pos, -1) != self.room_ids.get(next_pos, -2)):
-                    self.door_transitions.append({
-                        'prev_position': next_pos,
-                        'action': 0,  # DOWN
-                        'next_position': prev_pos,
-                        'type': 'door'
-                    })
-        
-        # Vertical doors (horizontal walls)
-        for i in range(1, self.rooms_per_side):
-            wall_col = i * (self.room_size + 1) - 1
-            for j in range(self.rooms_per_side):
-                door_row = j * (self.room_size + 1) + door_pos
+                    if (self.room_ids.get(prev_pos, -1) != self.room_ids.get(next_pos, -2)):
+                        self.door_transitions.append({
+                            'prev_position': prev_pos,
+                            'action': a,  # RIGHT
+                            'next_position': next_pos,
+                            'type': 'door'
+                        })
                 
-                if door_row >= self.grid_size:
-                    continue
-                
-                # From left of the door to the door position (RIGHT action)
-                prev_pos = (door_row, wall_col - 1)
-                next_pos = (door_row, wall_col)
-                if (prev_pos[1] >= 0 and next_pos[1] < self.grid_size and 
-                    self.room_ids.get(prev_pos, -1) != self.room_ids.get(next_pos, -2)):
-                    self.door_transitions.append({
-                        'prev_position': prev_pos,
-                        'action': 3,  # RIGHT
-                        'next_position': next_pos,
-                        'type': 'door'
-                    })
-                
-                # From the door position to right of the door (RIGHT action)
-                prev_pos = (door_row, wall_col)
-                next_pos = (door_row, wall_col + 1)
-                if (prev_pos[1] >= 0 and next_pos[1] < self.grid_size and 
-                    self.room_ids.get(prev_pos, -1) != self.room_ids.get(next_pos, -2)):
-                    self.door_transitions.append({
-                        'prev_position': next_pos,
-                        'action': 2,  # RIGHT
-                        'next_position': prev_pos,
-                        'type': 'door'
-                    })
-        
         # Precompute object transitions (all table positions)
         for table_pos in self.table_positions.keys():
             self.object_transitions.append({
@@ -216,6 +149,21 @@ class GridWorld:
             self.agent_pos = (x, y+1)
         elif action == 4:  # TOGGLE_OBJECT
             self._toggle_object()
+
+    def step_2(self, action, x, y):
+        """Execute an action (0=UP, 1=DOWN, 2=LEFT, 3=RIGHT, 4=TOGGLE)"""
+        #
+        next_x, next_y = x, y
+        if action == 0 and x > 0 and self.grid[x-1, y] != 1:  # UP
+            next_x, next_y = (next_x-1, next_y)
+        elif action == 1 and x < self.grid_size-1 and self.grid[x+1, y] != 1:  # DOWN
+            next_x, next_y = (next_x+1, next_y)
+        elif action == 2 and y > 0 and self.grid[x, y-1] != 1:  # LEFT
+            next_x, next_y = (next_x, next_y-1)
+        elif action == 3 and y < self.grid_size-1 and self.grid[x, y+1] != 1:  # RIGHT
+            next_x, next_y = (next_x, next_y+1)
+        
+        return next_x, next_y
     
     def _toggle_object(self):
         """Pick up or put down object if agent is at a table - FIXED VERSION"""
@@ -268,11 +216,9 @@ class Agent:
         self.knowledge_base = {
             'known_rooms': set(),  # Room IDs the agent has visited
             'room_connections': set(),  # Tuples (room1, room2) for connected rooms
-            'object_locations': {},  # Maps object_id to room_id where objects are located
-            'current_room': None,
+            'object_locations': set(),  # Object locations on tables
             'previous_room': None,  # Track previous room to detect connections
             'previous_inventory': None,  # Track inventory changes
-            'known_table_states': {}  # Track what we know about each table
         }
         
         # Initialize with starting room knowledge
@@ -280,13 +226,13 @@ class Agent:
     
     def _update_knowledge(self):
         """Update knowledge based on current state - FIXED object tracking"""
+
         state = self.grid_world.get_state()
         current_room = state['room_id']
-        current_inventory = state['inventory']
+        
         
         # Update room tracking
-        self.knowledge_base['previous_room'] = self.knowledge_base['current_room']
-        self.knowledge_base['current_room'] = current_room
+        self.knowledge_base['previous_room'] = current_room
         
         # Mark current room as known
         self.knowledge_base['known_rooms'].add(current_room)
@@ -300,61 +246,17 @@ class Agent:
             room2 = current_room
             connection = tuple(sorted([room1, room2]))
             self.knowledge_base['room_connections'].add(connection)
-        
-        # FIXED: Improved object tracking that handles pickup/drop properly
-        new_object_locations = {}
-        
-        # Track table states for all known tables
-        for table_pos in self.grid_world.table_positions.keys():
-            x, y = table_pos
-            room_id = self.grid_world.room_ids[table_pos]
-            
-            # If we're in the same room as the table, we can see its current state
-            if room_id == current_room:
-                if self.grid_world.grid[x, y] != 0:
-                    obj_id = self.grid_world.grid[x, y]
-                    new_object_locations[obj_id] = room_id
-                # If table is empty, remove any objects we thought were there
-                else:
-                    # Remove objects that were previously known to be at this table
-                    for known_obj, known_room in list(self.knowledge_base['object_locations'].items()):
-                        if known_room == room_id:
-                            # Check if this object might be at this specific table
-                            # We'll be conservative and only remove if we're sure
-                            pass
-            else:
-                # For tables in other rooms, preserve our previous knowledge
-                # unless we have evidence to the contrary
-                for known_obj, known_room in self.knowledge_base['object_locations'].items():
-                    if known_room == room_id:
-                        new_object_locations[known_obj] = room_id
-        
-        # FIXED: Handle inventory changes to track object movements
-        previous_inventory = self.knowledge_base['previous_inventory']
-        
+    
+        current_inventory = state['inventory']
+
         # If we just picked up an object, remove it from object_locations
-        if previous_inventory is None and current_inventory is not None:
-            # We picked up an object - find which one and remove it
-            current_table_obj = None
-            for table_pos in self.grid_world.table_positions.keys():
-                x, y = table_pos
-                room_id = self.grid_world.room_ids[table_pos]
-                if room_id == current_room and self.grid_world.grid[x, y] == 0:
-                    # This table in our current room just became empty
-                    # The object that was here is now in our inventory
-                    for known_obj, known_room in list(new_object_locations.items()):
-                        if known_room == current_room and known_obj == current_inventory:
-                            del new_object_locations[known_obj]
-                            break
-        
+        if self.knowledge_base['previous_inventory'] is None and current_inventory is not None:
+            self.knowledge_base['object_locations'] = set(x for x in self.knowledge_base['object_locations'] if x[1]!= current_inventory)
+
         # If we just put down an object, add it to object_locations
-        elif previous_inventory is not None and current_inventory is None:
+        elif self.knowledge_base['previous_inventory'] is not None and current_inventory is None:
             # We put down an object - it should be on a table in current room
-            obj_id = previous_inventory
-            new_object_locations[obj_id] = current_room
-        
-        # Update knowledge with current object locations
-        self.knowledge_base['object_locations'] = new_object_locations
+            self.knowledge_base['object_locations'].add((current_room, self.knowledge_base['previous_inventory']))
         
         # Update previous inventory for next comparison
         self.knowledge_base['previous_inventory'] = current_inventory
@@ -367,71 +269,6 @@ class Agent:
         # Update knowledge after action
         self._update_knowledge()
     
-    def get_knowledge(self):
-        """Return the current knowledge base"""
-        return self.knowledge_base.copy()
-    
-    def knows_room(self, room_id):
-        """Check if agent knows about a room"""
-        return room_id in self.knowledge_base['known_rooms']
-    
-    def knows_connection(self, room1, room2):
-        """Check if agent knows two rooms are connected"""
-        connection = tuple(sorted([room1, room2]))
-        return connection in self.knowledge_base['room_connections']
-    
-    def knows_object_location(self, obj_id):
-        """Check if agent knows where an object is located"""
-        return obj_id in self.knowledge_base['object_locations']
-    
-    def get_known_objects(self):
-        """Get all objects whose locations are known"""
-        return list(self.knowledge_base['object_locations'].keys())
-    
-    def get_connected_rooms(self, room_id):
-        """Get all rooms known to be connected to a given room"""
-        connected = set()
-        for conn in self.knowledge_base['room_connections']:
-            if room_id in conn:
-                other_room = conn[0] if conn[1] == room_id else conn[1]
-                connected.add(other_room)
-        return connected
-    
-    def get_known_connectivity_graph(self):
-        """Return the complete connectivity graph as a dictionary"""
-        graph = {}
-        for room in self.knowledge_base['known_rooms']:
-            graph[room] = self.get_connected_rooms(room)
-        return graph
-    
-    def render_knowledge(self):
-        """Display the agent's current knowledge"""
-        kb = self.knowledge_base
-        
-        print("=== Agent Knowledge Base ===")
-        print(f"Current Room: {kb['current_room']}")
-        print(f"Previous Room: {kb['previous_room']}")
-        print(f"Known Rooms: {sorted(kb['known_rooms'])}")
-        
-        print("\nRoom Connections:")
-        if kb['room_connections']:
-            for conn in sorted(kb['room_connections']):
-                print(f"  Room {conn[0]} ↔ Room {conn[1]}")
-        else:
-            print("  No connections discovered yet")
-        
-        print("\nConnectivity Graph:")
-        graph = self.get_known_connectivity_graph()
-        for room, connected in sorted(graph.items()):
-            print(f"  Room {room} → {sorted(connected)}")
-        
-        print("\nObject Locations (objects on tables):")
-        if kb['object_locations']:
-            for obj_id, room_id in kb['object_locations'].items():
-                obj_name = ObjectType(obj_id).name
-                print(f"  {obj_name} is in Room {room_id}")
-        else:
-            print("  No object locations known")
 
 
 class ActionType(Enum):
@@ -1354,6 +1191,7 @@ def demonstrate_integrated_planner():
     # Display initial state
     print("Initial grid state:")
     grid_world.render()
+    print(grid_world.door_transitions)
     print()
     
     # Step 2: Create action operators
@@ -1368,6 +1206,7 @@ def demonstrate_integrated_planner():
     print("3. Training Goal-Conditioned Q-Learning Agent...")
     q_agent = GoalConditionedQLearning(grid_world, debug=False)
     
+    print(q_agent.all_transitions)
     # Train for a reasonable number of steps (reduced for demo)
     q_agent.train_continuous(total_steps=5000, log_interval=1000)
     print()
