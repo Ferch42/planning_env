@@ -9,8 +9,8 @@ import copy
 
 class ObjectType(Enum):
     EMPTY = 0
-    KEY = 1
-    TREASURE = 2
+    KEY = 2
+    TREASURE = 3
     FOOD = 3
     TOOL = 4
 
@@ -87,6 +87,7 @@ class GridWorld:
                     room_centers.append((center_x, center_y))
         
         # Shuffle room centers to assign objects randomly
+        print(room_centers)
         random.shuffle(room_centers)
         
         # First, ensure at least one of each object type
@@ -119,7 +120,7 @@ class GridWorld:
                     prev_pos = (i,j)
                     next_pos = self.step_2(a, i,j)
 
-                    if (self.room_ids.get(prev_pos, -1) != self.room_ids.get(next_pos, -2)):
+                    if (self.room_ids.get(prev_pos, -1) != self.room_ids.get(next_pos, -1) and self.grid[prev_pos] != 1 and self.grid[next_pos] != 1):
                         self.door_transitions.append({
                             'prev_position': prev_pos,
                             'action': a, # MOVE action
@@ -614,7 +615,7 @@ class LearningAgent(Agent):
         
         # Track encountered transitions
         if activated_transition is not None:
-            self.encountered_transitions.add(activated_transition)
+            self.encountered_transitions.add((prev_state, action, next_state))
         
         # Learn from this experience (update all goal policies)
         self.q_learner.learn_from_experience(
@@ -649,6 +650,8 @@ class LearningAgent(Agent):
         """Log current learning and knowledge progress"""
         activated = len(self.encountered_transitions)
         total_transitions = len(self.q_learner.all_transitions)
+        #print(self.encountered_transitions)
+        #print(self.q_learner.all_transitions)
         known_rooms = len(self.knowledge_base['known_rooms'])
         known_objects = len(self.knowledge_base['object_locations'])
         known_connections = len(self.knowledge_base['room_connections'])
@@ -670,6 +673,7 @@ class LearningAgent(Agent):
     
 # Create environment and agent
 grid_world = GridWorld(num_rooms=4, room_size=3, debug=False)
+print(grid_world.grid)
 agent = LearningAgent(grid_world)
 
 # Use simple count-based exploration
