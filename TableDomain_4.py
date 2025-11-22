@@ -367,38 +367,51 @@ class PlanningDomain:
                         'room': current_room
                     }))
         
-        # Put down action (can put down in any room)
+        # Put down action (can only put down if no other object in the room)
         if kb_state['inventory'] is not None:
-            applicable.append((ActionType.PUT_DOWN, {
-                'object_type': kb_state['inventory'],
-                'room': current_room
-            }))
+            # Check if there are any objects already in the current room
+            objects_in_room = any(room == current_room for room, obj_type in kb_state['object_locations'])
+            if not objects_in_room:
+                applicable.append((ActionType.PUT_DOWN, {
+                    'object_type': kb_state['inventory'],
+                    'room': current_room
+                }))
         
         return applicable
     
     def is_goal_state(self, kb_state, goal):
-        """Check if knowledge base state satisfies goal condition"""
-        if 'object_location' in goal:
-            obj_type = goal['object_location']['object_type']
-            target_room = goal['object_location']['room']
-            return (target_room, obj_type) in kb_state['object_locations']
+        """Check if knowledge base state satisfies goal condition using propositional logic"""
+        """ Goal is represented as a nested tuple structure: ('AND', (1, 2), ('NOT', (1, 3)))"""
         
-        if 'inventory_contains' in goal:
-            return kb_state['inventory'] == goal['inventory_contains']
+        def evaluate_formula(formula):
+            """Recursively evaluate a logical formula"""
+            if isinstance(formula, tuple):
+                operator = formula[0]
+                
+                if operator == 'AND':
+                    # Evaluate all sub-formulas, return True only if all are true
+                    return all(evaluate_formula(sub_formula) for sub_formula in formula[1:])
+                
+                elif operator == 'NOT':
+                    # Negate the sub-formula
+                    return not evaluate_formula(formula[1])
+                
+                elif operator == 'OR':
+                    # Evaluate sub-formulas, return True if any is true
+                    return any(evaluate_formula(sub_formula) for sub_formula in formula[1:])
+                
+                else:
+                    # Assume it's an atomic predicate (room, object_type)
+                    room, obj_type = formula
+                    return (room, obj_type) in kb_state['object_locations']
             
-        return False
-    
-    def convert_to_kb_state(self, agent):
-        """Convert agent's knowledge base to planning state representation"""
-        current_state = agent.grid_world.get_state()
+            else:
+                # Assume it's an atomic predicate (room, object_type)
+                room, obj_type = formula
+                return (room, obj_type) in kb_state['object_locations']
         
-        return {
-            'current_room': current_state['room_id'],
-            'inventory': current_state['inventory'],
-            'known_rooms': copy.deepcopy(agent.knowledge_base['known_rooms']),
-            'room_connections': copy.deepcopy(agent.knowledge_base['room_connections']),
-            'object_locations': copy.deepcopy(agent.knowledge_base['object_locations'])
-        }
+        return evaluate_formula(goal)
+        
 
 class Planner:
     """Fixed planner with better goal checking and plan validation"""
