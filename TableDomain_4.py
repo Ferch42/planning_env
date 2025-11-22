@@ -462,3 +462,111 @@ class Planner:
             tuple(sorted(state['room_connections']))   # Added missing component
         )
 
+class GoalConditionedQLearning:
+    """Goal-conditioned Q-learning with absorbing states for wrong transitions"""
+    def __init__(self, grid_world, learning_rate=0.1, discount_factor=0.9):
+        self.grid_world = grid_world
+        self.alpha = learning_rate
+        self.gamma = discount_factor
+        
+        # Get all important transitions
+        transitions = grid_world.get_important_transitions()
+        self.all_transitions = transitions['door_transitions'] + transitions['object_transitions']
+        
+        # Create Q-tables for each transition goal
+        self.q_tables = {}
+        for i in range(len(self.all_transitions)):
+            self.q_tables[i] = defaultdict(lambda: np.zeros(5))  # 5 actions
+        
+        # Simple logging
+        self.transitions_activated = [0] * len(self.all_transitions)
+        self.steps = 0
+    
+    def check_transition_activation(self, prev_state, action, next_state):
+        """Check if any important transition was activated"""
+        for i, transition in enumerate(self.all_transitions):
+            if (transition['prev_position'] == prev_state and 
+                transition['action'] == action and
+                transition['next_position'] == next_state):
+                self.transitions_activated[i] += 1
+                return i
+        return None
+    
+    def learn_from_experience(self, prev_state, action, next_state, activated_transition):
+        """Update ALL goal policies with absorbing states for wrong transitions"""
+        for goal_index in range(len(self.all_transitions)):
+            # Reward is 1 only if this is the goal transition
+            reward = 1.0 if activated_transition == goal_index else 0.0
+            
+            # Get current Q-value
+            current_q = self.q_tables[goal_index][prev_state][action]
+            
+            # Calculate target Q-value
+            if activated_transition is not None:
+                target = reward
+            else:
+                # Normal case: bootstrap from next state
+                next_max = np.max(self.q_tables[goal_index][next_state])
+                target = reward + self.gamma * next_max
+            
+            # Update Q-value
+            new_q = current_q + self.alpha * (target - current_q)
+            self.q_tables[goal_index][prev_state][action] = new_q
+    
+    def train(self, total_steps=100000):
+        """Simple training with random exploration"""
+        print(f"Training {len(self.all_transitions)} policies for {total_steps} steps...")
+        
+        prev_state = self.grid_world.agent_pos
+        
+        for step in range(total_steps):
+            self.steps += 1
+            
+            # Always choose random action (0-4)
+            action = random.randint(0, 4)
+            
+            # Take action
+            self.grid_world.step(action)
+            next_state = self.grid_world.agent_pos
+            
+            # Check transition activation
+            activated_transition = self.check_transition_activation(prev_state, action, next_state)
+            
+            # Learn from experience
+            self.learn_from_experience(prev_state, action, next_state, activated_transition)
+            
+            prev_state = next_state
+            
+            # Minimal logging
+            if step % 20000 == 0:
+                activated = sum(1 for count in self.transitions_activated if count > 0)
+                print(f"Step {step}: Activated {activated}/{len(self.all_transitions)} transitions")
+        
+        # Final summary
+        activated = sum(1 for count in self.transitions_activated if count > 0)
+        print(f"Final: Activated {activated}/{len(self.all_transitions)} transitions")
+    
+    def get_policy(self, goal_index, position):
+        """Get best action for a given goal and position"""
+        q_values = self.q_tables[goal_index][position]
+        return np.argmax(q_values)
+    
+    def test_policy(self, goal_index, start_position, max_steps=50):
+        """Test a single policy"""
+        original_pos = self.grid_world.agent_pos
+        
+        self.grid_world.agent_pos = start_position
+        state = start_position
+        
+        for step in range(max_steps):
+            action = self.get_policy(goal_index, state)
+            prev_state = state
+            self.grid_world.step(action)
+            state = self.grid_world.agent_pos
+            
+            activated = self.check_transition_activation(prev_state, action, state)
+            if activated == goal_index:
+                print(f"Success in {step+1} steps!")
+                break
+        
+        self.grid_world.agent_pos = original_pos
