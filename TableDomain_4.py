@@ -122,7 +122,7 @@ class GridWorld:
                     if (self.room_ids.get(prev_pos, -1) != self.room_ids.get(next_pos, -2)):
                         self.door_transitions.append({
                             'prev_position': prev_pos,
-                            'action': a,  # RIGHT
+                            'action': a, # MOVE action
                             'next_position': next_pos,
                             'type': 'door'
                         })
@@ -570,3 +570,107 @@ class GoalConditionedQLearning:
                 break
         
         self.grid_world.agent_pos = original_pos
+
+class LearningAgent(Agent):
+    """Agent subclass that integrates GoalConditionedQLearning while exploring randomly"""
+    
+    def __init__(self, grid_world, learning_rate=0.1, discount_factor=0.9):
+        super().__init__(grid_world)
+        
+        # Initialize Q-learning
+        self.q_learner = GoalConditionedQLearning(
+            grid_world, 
+            learning_rate=learning_rate, 
+            discount_factor=discount_factor
+        )
+        
+        # Track which transitions we've encountered
+        self.encountered_transitions = set()
+        self.total_steps = 0
+        
+        # Simple count-based exploration: track state-action counts
+        self.state_action_counts = np.zeros((grid_world.grid_size, grid_world.grid_size, 5), dtype=int)
+        
+        print(f"LearningAgent initialized with {len(self.q_learner.all_transitions)} transitions to learn")
+    
+    def step(self, action):
+        """Override step to include Q-learning updates"""
+        prev_state = self.grid_world.agent_pos
+        prev_room = self.grid_world.get_current_room_id()
+        
+        # Update count before taking action
+        self.state_action_counts[prev_state[0], prev_state[1], action] += 1
+        
+        # Execute the action using parent class
+        super().step(action)
+        
+        next_state = self.grid_world.agent_pos
+        next_room = self.grid_world.get_current_room_id()
+        
+        # Check if this action activated any important transition
+        activated_transition = self.q_learner.check_transition_activation(
+            prev_state, action, next_state
+        )
+        
+        # Track encountered transitions
+        if activated_transition is not None:
+            self.encountered_transitions.add(activated_transition)
+        
+        # Learn from this experience (update all goal policies)
+        self.q_learner.learn_from_experience(
+            prev_state, action, next_state, activated_transition
+        )
+        
+        self.total_steps += 1
+    
+    def choose_action_count_based(self):
+        """Simple count-based exploration: choose the least taken action in current state"""
+        
+        x, y = self.grid_world.agent_pos
+        
+        return np.argmin(self.state_action_counts[x, y, :])
+        
+    
+    def explore_count_based(self, num_steps=10000, log_interval=1000):
+        """Explore using simple count-based exploration"""
+        print(f"Starting count-based exploration for {num_steps} steps...")
+        
+        for step in range(num_steps):
+            action = self.choose_action_count_based()
+            self.step(action)
+            
+            if step % log_interval == 0:
+                self._log_progress(step)
+        
+        self._log_progress(num_steps)
+        print("Count-based exploration completed!")
+    
+    def _log_progress(self, step):
+        """Log current learning and knowledge progress"""
+        activated = len(self.encountered_transitions)
+        total_transitions = len(self.q_learner.all_transitions)
+        known_rooms = len(self.knowledge_base['known_rooms'])
+        known_objects = len(self.knowledge_base['object_locations'])
+        known_connections = len(self.knowledge_base['room_connections'])
+        
+        print(f"Step {step}: Known {known_rooms} rooms, {known_connections} connections, "
+              f"{known_objects} objects, learned {activated}/{total_transitions} transitions")
+    
+    
+    def get_learning_progress(self):
+        """Get current learning progress statistics"""
+        return {
+            'total_steps': self.total_steps,
+            'encountered_transitions': len(self.encountered_transitions),
+            'total_transitions': len(self.q_learner.all_transitions),
+            'known_rooms': len(self.knowledge_base['known_rooms']),
+            'known_objects': len(self.knowledge_base['object_locations']),
+            'known_connections': len(self.knowledge_base['room_connections'])
+        }
+    
+# Create environment and agent
+grid_world = GridWorld(num_rooms=4, room_size=3, debug=False)
+agent = LearningAgent(grid_world)
+
+# Use simple count-based exploration
+agent.explore_count_based(num_steps=100000, log_interval=20000)
