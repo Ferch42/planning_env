@@ -119,13 +119,16 @@ class GridWorld:
                 for a in range(4):
                     prev_pos = (i,j)
                     next_pos = self.step_2(a, i,j)
+                    room1 = self.room_ids.get(prev_pos, -1)
+                    room2 = self.room_ids.get(next_pos, -1)
 
-                    if (self.room_ids.get(prev_pos, -1) != self.room_ids.get(next_pos, -1) and self.grid[prev_pos] != 1 and self.grid[next_pos] != 1):
+                    if (room1 != room2 and self.grid[prev_pos] != 1 and self.grid[next_pos] != 1):
                         self.door_transitions.append({
                             'prev_position': prev_pos,
                             'action': a, # MOVE action
                             'next_position': next_pos,
-                            'type': 'door'
+                            'type': 'door',
+                            'precondition': tuple(sorted([room1, room2]))
                         })
                 
         # Precompute object transitions (all table positions)
@@ -134,7 +137,8 @@ class GridWorld:
                 'prev_position': table_pos,
                 'action': 4,  # TOGGLE
                 'next_position': table_pos,
-                'type': 'object'
+                'type': 'object',
+                'precondition': self.room_ids.get(table_pos, -1)
             })
     
     def get_current_room_id(self):
@@ -413,6 +417,59 @@ class PlanningDomain:
         
         return evaluate_formula(goal)
 
+class EventAwarePlanningDomain(PlanningDomain):
+    """Planning domain that tracks events to update knowledge base"""
+    def __init__(self):
+        super().__init__()
+    
+    # Additional methods for event tracking can be added here
+    def get_applicable_actions(self, kb_state, events):
+        """Get all applicable actions in current knowledge base state with event awareness"""
+        
+        applicable = []
+        current_room = kb_state['current_room']
+        move_events = events.get('move_events', set())
+        pick_up_events = events.get('pick_up_events', set())
+        
+        move_events_connections = set(x['precondition'] for x in move_events)
+        filtered_connections = kb_state['room_connections'].intersection(move_events_connections)
+
+        selected_move_events = [x for x in move_events if x['precondition'] in filtered_connections]
+        # Move actions to connected rooms
+
+        for ev in selected_move_events:
+            connection = ev['precondition']
+            if current_room in connection:
+                other_room = connection[0] if connection[1] == current_room else connection[1]
+                applicable.append((ActionType.MOVE, {
+                    'from_room': current_room,
+                    'to_room': other_room,
+                    'transition_event': (ev['prev_position'], ev['action'], ev['next_position'])
+                }))
+        
+        applicable_pickup_events = [x for x in pick_up_events if x['precondition'] == current_room]
+        
+        for ev in applicable_pickup_events:
+
+            if kb_state['inventory'] is None:
+                obj_type = self._get_object_type_from_position(ev['prev_position'], kb_state)
+                if obj_type is not None:
+                    applicable.append((ActionType.PICK_UP, {
+                        'object_type': obj_type,
+                        'room': current_room,
+                        'transition_event': (ev['prev_position'], ev['action'], ev['next_position'])
+                    })) 
+            if kb_state['inventory'] is not None:
+                # Check if there are any objects already in the current room
+                objects_in_room = any(room == current_room for room, obj_type in kb_state['object_locations'])
+                if not objects_in_room:
+                    applicable.append((ActionType.PUT_DOWN, {
+                        'object_type': kb_state['inventory'],
+                        'room': current_room,
+                        'transition_event': (ev['prev_position'], ev['action'], ev['next_position'])
+                    }))
+        
+        return applicable
       
 class Planner:
     """Fixed planner with consistent state representation"""
@@ -597,7 +654,6 @@ class LearningAgent(Agent):
     def step(self, action):
         """Override step to include Q-learning updates"""
         prev_state = self.grid_world.agent_pos
-        prev_room = self.grid_world.get_current_room_id()
         
         # Update count before taking action
         self.state_action_counts[prev_state[0], prev_state[1], action] += 1
@@ -606,8 +662,7 @@ class LearningAgent(Agent):
         super().step(action)
         
         next_state = self.grid_world.agent_pos
-        next_room = self.grid_world.get_current_room_id()
-        
+       
         # Check if this action activated any important transition
         activated_transition = self.q_learner.check_transition_activation(
             prev_state, action, next_state
@@ -650,8 +705,6 @@ class LearningAgent(Agent):
         """Log current learning and knowledge progress"""
         activated = len(self.encountered_transitions)
         total_transitions = len(self.q_learner.all_transitions)
-        #print(self.encountered_transitions)
-        #print(self.q_learner.all_transitions)
         known_rooms = len(self.knowledge_base['known_rooms'])
         known_objects = len(self.knowledge_base['object_locations'])
         known_connections = len(self.knowledge_base['room_connections'])
@@ -672,7 +725,7 @@ class LearningAgent(Agent):
         }
     
 # Create environment and agent
-grid_world = GridWorld(num_rooms=64, room_size=5, debug=False)
+grid_world = GridWorld(num_rooms=81, room_size=5, debug=False)
 agent = LearningAgent(grid_world)
 
 # Use simple count-based exploration
