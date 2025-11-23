@@ -10,11 +10,11 @@ import copy
 class ObjectType(Enum):
     EMPTY = 0
     A = 2
-    B = 3
-    C = 3
-    D = 4
-    E = 5
-    F = 6
+    #B = 3
+    #C = 3
+    #D = 4
+    #E = 5
+    #F = 6
 
 class ActionType(Enum):
     MOVE = 0
@@ -22,7 +22,7 @@ class ActionType(Enum):
     PUT_DOWN = 2
 
 class GridWorld:
-    def __init__(self, num_rooms=4, room_size=3, debug=False):
+    def __init__(self, num_rooms=4, room_size=5, debug=False):
         self.num_rooms = num_rooms
         self.room_size = room_size
         self.rooms_per_side = int(np.sqrt(num_rooms))
@@ -88,15 +88,18 @@ class GridWorld:
                     self.table_positions[(center_x, center_y)] = (room_x, room_y)
                     room_centers.append((center_x, center_y))
         
+        """
         # Shuffle room centers to assign objects randomly
         random.shuffle(room_centers)
-        
         # First, ensure at least one of each object type
         for i, obj_type in enumerate(object_types):
             if i < len(room_centers):
                 center_x, center_y = room_centers[i]
                 self.grid[center_x, center_y] = obj_type
-    
+        """
+
+        self.grid[5,5] = ObjectType.A.value
+
     def _assign_room_ids(self):
         """Assign room IDs to all positions in the grid"""
         mat = np.zeros((self.grid_size, self.grid_size), dtype=int)
@@ -210,14 +213,14 @@ class GridWorld:
         return {
             'grid': grid_state,
             'room_id': self.get_current_room_id(),
-            'inventory': self.agent_inventory
+            'current_inventory': self.agent_inventory
         }
     
     def render(self):
         """Display the current state"""
         state = self.get_state()
         print(state['grid'])
-        print(f"Room ID: {state['room_id']}, Inventory: {state['inventory']}")
+        print(f"Room ID: {state['room_id']}, Inventory: {state['current_inventory']}")
 
 
 class Agent:
@@ -227,8 +230,8 @@ class Agent:
             'known_rooms': set(),  # Room IDs the agent has visited
             'room_connections': set(),  # Tuples (room1, room2) for connected rooms
             'object_locations': set(),  # Object locations on tables
-            'previous_room': None,  # Track previous room to detect connections
-            'previous_inventory': None,  # Track inventory changes
+            'current_room': None,  # Track previous room to detect connections
+            'current_inventory': None,  # Track inventory changes
         }
         
         # Initialize with starting room knowledge
@@ -245,31 +248,31 @@ class Agent:
         self.knowledge_base['known_rooms'].add(current_room)
         
         # Detect and record room connections
-        if (self.knowledge_base['previous_room'] is not None and 
-            self.knowledge_base['previous_room'] != current_room):
+        if (self.knowledge_base['current_room'] is not None and 
+            self.knowledge_base['current_room'] != current_room):
             
             # Add bidirectional connection
-            room1 = self.knowledge_base['previous_room']
+            room1 = self.knowledge_base['current_room']
             room2 = current_room
             connection = tuple(sorted([room1, room2]))
             self.knowledge_base['room_connections'].add(connection)
     
-        current_inventory = state['inventory']
+        current_inventory = state['current_inventory']
 
         # If we just picked up an object, remove it from object_locations
-        if self.knowledge_base['previous_inventory'] is None and current_inventory is not None:
+        if self.knowledge_base['current_inventory'] is None and current_inventory is not None:
             self.knowledge_base['object_locations'] = set(x for x in self.knowledge_base['object_locations'] if x[1]!= current_inventory)
 
         # If we just put down an object, add it to object_locations
-        elif self.knowledge_base['previous_inventory'] is not None and current_inventory is None:
+        elif self.knowledge_base['current_inventory'] is not None and current_inventory is None:
             # We put down an object - it should be on a table in current room
-            self.knowledge_base['object_locations'].add((current_room, self.knowledge_base['previous_inventory']))
+            self.knowledge_base['object_locations'].add((current_room, self.knowledge_base['current_inventory']))
         
         # Update previous inventory for next comparison
-        self.knowledge_base['previous_inventory'] = current_inventory
+        self.knowledge_base['current_inventory'] = current_inventory
 
         # Update room tracking
-        self.knowledge_base['previous_room'] = current_room
+        self.knowledge_base['current_room'] = current_room
     
     def step(self, action):
         """Take an action and update knowledge"""
@@ -294,7 +297,7 @@ class PlanningDomain:
         """Get all available action types"""
         return list(self.actions.keys())
     
-    def _move_action(self, kb_state, from_room, to_room):
+    def _move_action(self, kb_state, from_room, to_room, transition_event = None):
         """Move action: agent moves between connected rooms based on knowledge"""
         current_room = kb_state['current_room']
         if current_room != from_room:
@@ -310,35 +313,35 @@ class PlanningDomain:
         new_state['known_rooms'].add(to_room)
         return new_state, f"Moved from room {from_room} to room {to_room}"
     
-    def _pick_up_action(self, kb_state, object_type, room):
+    def _pick_up_action(self, kb_state, object_type, room, transition_event = None):
         """Pick up action: agent picks up object from current room based on knowledge"""
         current_room = kb_state['current_room']
         if current_room != room:
             return None, f"Agent not in room {room} (currently in {current_room})"
             
-        if kb_state['inventory'] is not None:
-            return None, f"Agent already holding object {kb_state['inventory']}"
+        if kb_state['current_inventory'] is not None:
+            return None, f"Agent already holding object {kb_state['current_inventory']}"
             
         # Check if object is known to be in this room
         if (room, object_type) not in kb_state['object_locations']:
             return None, f"Object {object_type} not known to be in room {room}"
             
         new_state = copy.deepcopy(kb_state)
-        new_state['inventory'] = object_type
+        new_state['current_inventory'] = object_type
         new_state['object_locations'].remove((room, object_type))
         return new_state, f"Picked up object {object_type} in room {room}"
     
-    def _put_down_action(self, kb_state, object_type, room):
+    def _put_down_action(self, kb_state, object_type, room, transition_event = None):
         """Put down action: agent puts object in current room based on knowledge"""
         current_room = kb_state['current_room']
         if current_room != room:
             return None, f"Agent not in room {room}"
             
-        if kb_state['inventory'] != object_type:
-            return None, f"Agent not holding object {object_type} (holding {kb_state['inventory']})"
+        if kb_state['current_inventory'] != object_type:
+            return None, f"Agent not holding object {object_type} (holding {kb_state['current_inventory']})"
             
         new_state = copy.deepcopy(kb_state)
-        new_state['inventory'] = None
+        new_state['current_inventory'] = None
         new_state['object_locations'].add((room, object_type))
         return new_state, f"Put down object {object_type} in room {room}"
     
@@ -364,7 +367,7 @@ class PlanningDomain:
                 }))
         
         # Pick up actions for objects in current room
-        if kb_state['inventory'] is None:
+        if kb_state['current_inventory'] is None:
             for room, obj_type in kb_state['object_locations']:
                 if room == current_room:
                     applicable.append((ActionType.PICK_UP, {
@@ -373,12 +376,12 @@ class PlanningDomain:
                     }))
         
         # Put down action (can only put down if no other object in the room)
-        if kb_state['inventory'] is not None:
+        if kb_state['current_inventory'] is not None:
             # Check if there are any objects already in the current room
             objects_in_room = any(room == current_room for room, obj_type in kb_state['object_locations'])
             if not objects_in_room:
                 applicable.append((ActionType.PUT_DOWN, {
-                    'object_type': kb_state['inventory'],
+                    'object_type': kb_state['current_inventory'],
                     'room': current_room
                 }))
         
@@ -428,8 +431,8 @@ class EventAwarePlanningDomain(PlanningDomain):
         
         applicable = []
         current_room = kb_state['current_room']
-        move_events = [ev for ev in events[agent_pos] if ev['type'] == 'door']
-        pick_up_events = [ev for ev in events[agent_pos] if ev['type'] == 'object']
+        move_events = [ev for ev in events.get(agent_pos, []) if ev['type'] == 'door']
+        pick_up_events = [ev for ev in events.get(agent_pos, []) if ev['type'] == 'object']
         
         move_events_connections = set(x['precondition'] for x in move_events)
         filtered_connections = kb_state['room_connections'].intersection(move_events_connections)
@@ -451,20 +454,21 @@ class EventAwarePlanningDomain(PlanningDomain):
         
         for ev in applicable_pickup_events:
 
-            if kb_state['inventory'] is None:
-                obj_type = self._get_object_type_from_position(ev['prev_position'], kb_state)
-                if obj_type is not None:
-                    applicable.append((ActionType.PICK_UP, {
-                        'object_type': obj_type,
-                        'room': current_room,
-                        'transition_event': (ev['prev_position'], ev['action'], ev['next_position'])
-                    })) 
-            if kb_state['inventory'] is not None:
+            if kb_state['current_inventory'] is None:
+                for room, obj_type in kb_state['object_locations']:
+                    if room == current_room:
+                        applicable.append((ActionType.PICK_UP, {
+                            'object_type': obj_type,
+                            'room': current_room,
+                            'transition_event': (ev['prev_position'], ev['action'], ev['next_position'])
+                        })) 
+
+            if kb_state['current_inventory'] is not None:
                 # Check if there are any objects already in the current room
                 objects_in_room = any(room == current_room for room, obj_type in kb_state['object_locations'])
                 if not objects_in_room:
                     applicable.append((ActionType.PUT_DOWN, {
-                        'object_type': kb_state['inventory'],
+                        'object_type': kb_state['current_inventory'],
                         'room': current_room,
                         'transition_event': (ev['prev_position'], ev['action'], ev['next_position'])
                     }))
@@ -514,7 +518,7 @@ class Planner:
         """Create a hashable key for state - FIXED VERSION"""
         return (
             state['current_room'],           # Fixed key name
-            state['inventory'],              # Fixed key name
+            state['current_inventory'],              # Fixed key name
             tuple(sorted(state['object_locations'])),  # Fixed: it's a set, not dict
             tuple(sorted(state['known_rooms'])),       # Added missing component
             tuple(sorted(state['room_connections']))   # Added missing component
@@ -564,7 +568,7 @@ class EventAwarePlanner(Planner):
         """Create a hashable key for state - FIXED VERSION"""
         return (
             state['current_room'],           # Fixed key name
-            state['inventory'],              # Fixed key name
+            state['current_inventory'],              # Fixed key name
             tuple(sorted(state['object_locations'])),   # Fixed: it's a set, not dict
             tuple(sorted(state['known_rooms'])),        # Added missing component
             tuple(sorted(state['room_connections'])),   # Added missing component,
@@ -740,7 +744,7 @@ class LearningAgent(Agent):
         x, y = self.grid_world.agent_pos
         return np.argmin(self.state_action_counts[x, y, :])
     
-    def interaction_loop(self, num_steps=100_000, max_timesteps = 100):
+    def interaction_loop(self, num_steps=100_000, max_timesteps = 10):
         """Interact with the environment for a number of steps"""
 
         t = 0
@@ -779,10 +783,10 @@ class LearningAgent(Agent):
         for i in range(self.grid_world.grid_size):
             for j in range(self.grid_world.grid_size):
                 pos = (i,j)
-                possible_events[pos] = set()
+                possible_events[pos] = []
                 for i, ev in enumerate(self.q_learner.all_transitions):
                     if self.q_learner.q_tables[i][pos].max() > 0:
-                        possible_events[pos].add(ev)
+                        possible_events[pos].append(copy.deepcopy(ev))
         return possible_events
 
     
@@ -824,9 +828,11 @@ class LearningAgent(Agent):
         }
     
 # Create environment and agent
-grid_world = GridWorld(num_rooms=81, room_size=5, debug=False)
-agent = LearningAgent(grid_world)
+grid_world = GridWorld(num_rooms=4, room_size=3, debug=False)
+print(grid_world.grid)
+agent = LearningAgent(grid_world,goal = (1,1))
+
 
 # Use simple count-based exploration
-agent.explore_count_based(num_steps=10000, log_interval=2000)
-print(agent.q_learner.q_tables[0])
+agent.interaction_loop(num_steps=1000, max_timesteps=10)
+#print(agent.q_learner.q_tables[0])
