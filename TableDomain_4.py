@@ -423,13 +423,13 @@ class EventAwarePlanningDomain(PlanningDomain):
         super().__init__()
     
     # Additional methods for event tracking can be added here
-    def get_applicable_actions(self, kb_state, events):
+    def get_applicable_actions(self, kb_state, events, agent_pos):
         """Get all applicable actions in current knowledge base state with event awareness"""
         
         applicable = []
         current_room = kb_state['current_room']
-        move_events = events.get('move_events', set())
-        pick_up_events = events.get('pick_up_events', set())
+        move_events = [ev for ev in events[agent_pos] if ev['type'] == 'door']
+        pick_up_events = [ev for ev in events[agent_pos] if ev['type'] == 'object']
         
         move_events_connections = set(x['precondition'] for x in move_events)
         filtered_connections = kb_state['room_connections'].intersection(move_events_connections)
@@ -518,6 +518,57 @@ class Planner:
             tuple(sorted(state['object_locations'])),  # Fixed: it's a set, not dict
             tuple(sorted(state['known_rooms'])),       # Added missing component
             tuple(sorted(state['room_connections']))   # Added missing component
+        )
+
+class EventAwarePlanner(Planner):
+
+    def __init__(self, domain):
+        super().__init__(domain)
+    
+    def bfs_plan(self, initial_state, goal ,events, agent_pos, max_depth=50):
+        """Find plan using BFS with event awareness and proper goal checking"""
+        if self.domain.is_goal_state(initial_state, goal):
+            return []
+        
+        queue = deque([(initial_state, [])])
+        visited = set()
+        
+        while queue:
+            state, plan = queue.popleft()
+            
+            if self.domain.is_goal_state(state, goal):
+                return plan
+            
+            if len(plan) >= max_depth:
+                continue
+                
+            state_key = self._get_state_key(state, agent_pos)
+
+            if state_key in visited:
+                continue
+            visited.add(state_key)
+            
+            for action_type, params in self.domain.get_applicable_actions(state, events, agent_pos):
+                new_state, result_msg = self.domain.apply_action(state, action_type, **params)
+                next_agent_pos = params.get('transition_event', (None, None, None))[2]
+                
+                if new_state is not None:
+                    new_state_key = self._get_state_key(new_state, next_agent_pos)
+                    if new_state_key not in visited:
+                        action_desc = f"{action_type.name}: {result_msg}"
+                        queue.append((new_state, plan + [(action_type, params, action_desc)]))
+        
+        return None
+    
+    def _get_state_key(self, state, agent_pos):
+        """Create a hashable key for state - FIXED VERSION"""
+        return (
+            state['current_room'],           # Fixed key name
+            state['inventory'],              # Fixed key name
+            tuple(sorted(state['object_locations'])),   # Fixed: it's a set, not dict
+            tuple(sorted(state['known_rooms'])),        # Added missing component
+            tuple(sorted(state['room_connections'])),   # Added missing component,
+            agent_pos
         )
 
 class GoalConditionedQLearning:
@@ -632,7 +683,7 @@ class GoalConditionedQLearning:
 class LearningAgent(Agent):
     """Agent subclass that integrates GoalConditionedQLearning while exploring randomly"""
     
-    def __init__(self, grid_world, learning_rate=0.1, discount_factor=0.9):
+    def __init__(self, grid_world, goal = None, learning_rate=0.1, discount_factor=0.9):
         super().__init__(grid_world)
         
         # Initialize Q-learning
@@ -649,8 +700,12 @@ class LearningAgent(Agent):
         # Simple count-based exploration: track state-action counts
         self.state_action_counts = np.zeros((grid_world.grid_size, grid_world.grid_size, 5), dtype=int)
         
+        # Planner
+        self.planner = EventAwarePlanner(EventAwarePlanningDomain())
         print(f"LearningAgent initialized with {len(self.q_learner.all_transitions)} transitions to learn")
-    
+        
+        self.goal = goal
+
     def step(self, action):
         """Override step to include Q-learning updates"""
         prev_state = self.grid_world.agent_pos
@@ -683,9 +738,53 @@ class LearningAgent(Agent):
         """Simple count-based exploration: choose the least taken action in current state"""
         
         x, y = self.grid_world.agent_pos
-        
         return np.argmin(self.state_action_counts[x, y, :])
-        
+    
+    def interaction_loop(self, num_steps=100_000, max_timesteps = 100):
+        """Interact with the environment for a number of steps"""
+
+        t = 0
+        while t < num_steps:
+            
+            possible_events = self.get_possible_events()
+
+            plan = self.planner.bfs_plan(self.knowledge_base, self.goal, possible_events, self.grid_world.agent_pos)
+            
+            current_grid_pos = self.grid_world.agent_pos
+
+            if plan is not None and len(plan) > 0:
+                for action_type, params, action_desc in plan:
+                    
+                    action_event = params.get('transition_event', None)
+                    event_index = [i[0] for i in enumerate(self.q_learner.all_transitions) if i[1]['prev_position'] == action_event[0] and i[1]['action']   == action_event[1] and i[1]['next_position'] == action_event[2]][0]
+                    for _ in range(max_timesteps):
+                        action = self.q_learner.get_policy(event_index, current_grid_pos)
+                        self.step(action)
+                        t += 1
+                        next_grid_pos = self.grid_world.agent_pos
+                        
+                        if (current_grid_pos, action, next_grid_pos) == action_event:
+                            break
+                        current_grid_pos = next_grid_pos
+            else:
+
+                for _ in range(max_timesteps):
+                    action = self.choose_action_count_based()
+                    self.step(action)   
+                    t += 1
+
+    def get_possible_events(self):
+        """Get possible events at each position based on learned Q-tables"""
+        possible_events = {}
+        for i in range(self.grid_world.grid_size):
+            for j in range(self.grid_world.grid_size):
+                pos = (i,j)
+                possible_events[pos] = set()
+                for i, ev in enumerate(self.q_learner.all_transitions):
+                    if self.q_learner.q_tables[i][pos].max() > 0:
+                        possible_events[pos].add(ev)
+        return possible_events
+
     
     def explore_count_based(self, num_steps=10000, log_interval=1000):
         """Explore using simple count-based exploration"""
@@ -729,4 +828,5 @@ grid_world = GridWorld(num_rooms=81, room_size=5, debug=False)
 agent = LearningAgent(grid_world)
 
 # Use simple count-based exploration
-agent.explore_count_based(num_steps=500000, log_interval=20000)
+agent.explore_count_based(num_steps=10000, log_interval=2000)
+print(agent.q_learner.q_tables[0])
