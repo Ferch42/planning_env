@@ -769,6 +769,17 @@ class LearningAgent(Agent):
         x, y = self.grid_world.agent_pos
         return np.argmin(self.state_action_counts[x, y, :])
     
+    def get_new_goal(self):
+        """Randomly select a new goal"""
+
+        while(True):
+            object_id = random.choice([obj.value for obj in ObjectType if obj != ObjectType.EMPTY])
+            room_id = random.randint(0, self.grid_world.rooms_per_side**2 - 1)
+            goal = (room_id, object_id)
+            if goal not in self.knowledge_base['object_locations']:
+                return goal
+
+
     def interaction_loop(self, num_steps=100_000, max_steps = 20):
         """Interact with the environment for a number of steps"""
 
@@ -776,6 +787,7 @@ class LearningAgent(Agent):
   
         planning_trials = []
         count = 0
+        explore_count = 0
         while t < num_steps:
             
             possible_events = self.get_possible_events()
@@ -806,6 +818,8 @@ class LearningAgent(Agent):
 
                         if self.planner.domain.is_goal_state(self.knowledge_base, self.goal):
                             planning_trials.append(1)
+                            self.goal = self.get_new_goal()
+                            print(f"New goal set: {self.goal}")
                             #print("Goal achieved!")
                         
                         if (current_grid_pos, action, next_grid_pos) == action_event:
@@ -823,11 +837,17 @@ class LearningAgent(Agent):
             
             if len(planning_trials) > count:
                 print(f"Step {t}: Percentage completed {t/ num_steps * 100:.2f}%")
-                print(f"Planning success rate: {np.mean(planning_trials[-20:])*100:.2f}% over last {len(planning_trials[-20:])} trials")
+                print(f"Planning success rate: {np.mean(planning_trials[-20:])*100:.2f}% over last {len(planning_trials)} trials")
                 count = len(planning_trials)            
-            for _ in range(max_steps*5):
+            
+            explore_count +=1
+
+            if explore_count % 10 == 0:
+                self._log_progress(t)
+            for _ in range(max_steps*100):
                 action = self.choose_action_count_based()
-                self.step(action)   
+                self.step(action)
+                       
                 t += 1
                     
                 
@@ -887,9 +907,9 @@ print(grid_world.grid)
 
 agent = LearningAgent(grid_world,goal = (0,2))
 
-#agent.q_learner.train(total_steps=500000)
+#agent.q_learner.train(total_steps=500_000)
 
 # Use simple count-based exploration
-agent.interaction_loop(num_steps=100_000)
+agent.interaction_loop(num_steps=1_000_000)
 #print(agent.q_learner.q_tables[0])
 print(grid_world.grid)
