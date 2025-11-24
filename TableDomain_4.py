@@ -10,10 +10,10 @@ class ObjectType(Enum):
     EMPTY = 0
     A = 2
     B = 3
-    #C = 3
-    #D = 4
-    #E = 5
-    #F = 6
+    C = 3
+    D = 4
+    E = 5
+    F = 6
 
 class ActionType(Enum):
     MOVE = 0
@@ -87,7 +87,6 @@ class GridWorld:
                     self.table_positions[(center_x, center_y)] = (room_x, room_y)
                     room_centers.append((center_x, center_y))
         
-        """
         # Shuffle room centers to assign objects randomly
         random.shuffle(room_centers)
         # First, ensure at least one of each object type
@@ -95,10 +94,10 @@ class GridWorld:
             if i < len(room_centers):
                 center_x, center_y = room_centers[i]
                 self.grid[center_x, center_y] = obj_type
-        """
 
-        self.grid[5,5] = 3
-        self.grid[1,5] = 2
+
+        #self.grid[5,5] = 3
+        #self.grid[1,5] = 2
 
     def _assign_room_ids(self):
         """Assign room IDs to all positions in the grid"""
@@ -275,7 +274,7 @@ class Agent:
         
         if self.knowledge_base['at_table'] and currently_at_table:
             # Agent just moved away from a table, ensure object location is updated
-            if current_inventory is None:
+            if current_inventory is None and self.knowledge_base['current_inventory'] is None:
                 # If not holding anything, mark table as empty
                 self.knowledge_base['object_locations'] = set(x for x in self.knowledge_base['object_locations'] if x[0]!= current_room)
                 self.knowledge_base['object_locations'].add((current_room, -1))
@@ -357,8 +356,12 @@ class PlanningDomain:
         if kb_state['current_inventory'] != object_type:
             return None, f"Agent not holding object {object_type} (holding {kb_state['current_inventory']})"
             
+        if (room, -1) not in kb_state['object_locations']:
+            return None, f"Room {room} does not have an empty table to put down the object"
+
         new_state = copy.deepcopy(kb_state)
         new_state['current_inventory'] = None
+        new_state['object_locations'].remove((room, -1))  # Remove empty table marker
         new_state['object_locations'].add((room, object_type))
         return new_state, f"Put down object {object_type} in room {room}"
     
@@ -766,48 +769,66 @@ class LearningAgent(Agent):
         x, y = self.grid_world.agent_pos
         return np.argmin(self.state_action_counts[x, y, :])
     
-    def interaction_loop(self, num_steps=100_000, max_timesteps = 100):
+    def interaction_loop(self, num_steps=100_000, max_steps = 20):
         """Interact with the environment for a number of steps"""
 
         t = 0
   
+        planning_trials = []
+        count = 0
         while t < num_steps:
             
             possible_events = self.get_possible_events()
             
             current_grid_pos = self.grid_world.agent_pos
-            
 
             plan = self.planner.bfs_plan(self.knowledge_base, self.goal, possible_events, self.grid_world.agent_pos)
-            
 
             if plan is not None and len(plan) > 0:
                 #print(f"Executing plan of length {len(plan)} at step {t}")
-                print(f"Executing plan {plan} at step {t}")
-                print(self.knowledge_base)
+                #print(f"Executing plan {plan} at step {t}")
+                #print(self.knowledge_base)
                 for action_type, params, action_desc in plan:
                     
                     action_event = params.get('transition_event', None)
                     event_index = [i[0] for i in enumerate(self.q_learner.all_transitions) if i[1]['prev_position'] == action_event[0] and i[1]['action']   == action_event[1] and i[1]['next_position'] == action_event[2]][0]
-                    for _ in range(max_timesteps):
+                    
+                    event_completed = False
+                    for _ in range(max_steps):
                         
                         action = self.q_learner.get_policy(event_index, current_grid_pos)
                         self.step(action)
 
-                        self.grid_world.render()
-                        time.sleep(0.5)
+                        #self.grid_world.render()
+                        #time.sleep(0.5)
                         t += 1
                         next_grid_pos = self.grid_world.agent_pos
+
+                        if self.planner.domain.is_goal_state(self.knowledge_base, self.goal):
+                            planning_trials.append(1)
+                            #print("Goal achieved!")
                         
                         if (current_grid_pos, action, next_grid_pos) == action_event:
+                            #print(f"Completed action: {action_desc}")
+                            #print(self.knowledge_base)
+                            #self.grid_world.render()
+                            event_completed = True
                             break
                         current_grid_pos = next_grid_pos
-            else:
 
-                for _ in range(max_timesteps):
-                    action = self.choose_action_count_based()
-                    self.step(action)   
-                    t += 1
+                    if not event_completed:
+                        #print(f"Failed to complete action: {action_desc}, reverting to count-based exploration")
+                        planning_trials.append(0)
+                        break
+            
+            if len(planning_trials) > count:
+                print(f"Step {t}: Percentage completed {t/ num_steps * 100:.2f}%")
+                print(f"Planning success rate: {np.mean(planning_trials[-20:])*100:.2f}% over last {len(planning_trials[-20:])} trials")
+                count = len(planning_trials)            
+            for _ in range(max_steps*5):
+                action = self.choose_action_count_based()
+                self.step(action)   
+                t += 1
                     
                 
     def get_possible_events(self):
@@ -866,9 +887,9 @@ print(grid_world.grid)
 
 agent = LearningAgent(grid_world,goal = (0,2))
 
-agent.q_learner.train(total_steps=100000)
+#agent.q_learner.train(total_steps=500000)
 
 # Use simple count-based exploration
-agent.interaction_loop(num_steps=10000, max_timesteps=10)
+agent.interaction_loop(num_steps=100_000)
 #print(agent.q_learner.q_tables[0])
 print(grid_world.grid)
