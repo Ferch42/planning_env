@@ -273,7 +273,7 @@ class Agent:
             self.knowledge_base['object_locations'] = set(x for x in self.knowledge_base['object_locations'] if x[0]!= current_room)
             self.knowledge_base['object_locations'].add((current_room, self.knowledge_base['current_inventory']))
         
-        if self.knowledge_base['at_table'] and not currently_at_table:
+        if self.knowledge_base['at_table'] and currently_at_table:
             # Agent just moved away from a table, ensure object location is updated
             if current_inventory is None:
                 # If not holding anything, mark table as empty
@@ -784,6 +784,7 @@ class LearningAgent(Agent):
             if plan is not None and len(plan) > 0:
                 #print(f"Executing plan of length {len(plan)} at step {t}")
                 print(f"Executing plan {plan} at step {t}")
+                print(self.knowledge_base)
                 for action_type, params, action_desc in plan:
                     
                     action_event = params.get('transition_event', None)
