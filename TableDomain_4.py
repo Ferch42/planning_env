@@ -1,16 +1,15 @@
 import numpy as np
 import random
-import unittest
 from enum import Enum
 from collections import deque, defaultdict
-import heapq
 from typing import Dict, List, Set, Tuple, Optional, Any
 import copy
+import time
 
 class ObjectType(Enum):
     EMPTY = 0
     A = 2
-    #B = 3
+    B = 3
     #C = 3
     #D = 4
     #E = 5
@@ -98,7 +97,8 @@ class GridWorld:
                 self.grid[center_x, center_y] = obj_type
         """
 
-        self.grid[5,5] = ObjectType.A.value
+        self.grid[5,5] = 3
+        self.grid[1,5] = 2
 
     def _assign_room_ids(self):
         """Assign room IDs to all positions in the grid"""
@@ -504,6 +504,7 @@ class Planner:
             visited.add(state_key)
             
             for action_type, params in self.domain.get_applicable_actions(state):
+                
                 new_state, result_msg = self.domain.apply_action(state, action_type, **params)
                 
                 if new_state is not None:
@@ -534,33 +535,40 @@ class EventAwarePlanner(Planner):
         if self.domain.is_goal_state(initial_state, goal):
             return []
         
-        queue = deque([(initial_state, [])])
+        queue = deque([(initial_state, agent_pos, [])])
         visited = set()
         
         while queue:
-            state, plan = queue.popleft()
-            
+            state, current_agent_pos, plan = queue.popleft()
             if self.domain.is_goal_state(state, goal):
                 return plan
             
+            #print(plan)
             if len(plan) >= max_depth:
                 continue
                 
-            state_key = self._get_state_key(state, agent_pos)
+            state_key = self._get_state_key(state, current_agent_pos)
 
             if state_key in visited:
                 continue
             visited.add(state_key)
             
-            for action_type, params in self.domain.get_applicable_actions(state, events, agent_pos):
+            #print("Visiting state:")
+            #print(state_key)
+            #print(self.domain.get_applicable_actions(state, events, current_agent_pos))
+            for action_type, params in self.domain.get_applicable_actions(state, events, current_agent_pos):
+                #print("Considering action:")
+                #print(action_type, params)
+                
                 new_state, result_msg = self.domain.apply_action(state, action_type, **params)
                 next_agent_pos = params.get('transition_event', (None, None, None))[2]
                 
+                #print(self._get_state_key(new_state, next_agent_pos))
                 if new_state is not None:
                     new_state_key = self._get_state_key(new_state, next_agent_pos)
                     if new_state_key not in visited:
                         action_desc = f"{action_type.name}: {result_msg}"
-                        queue.append((new_state, plan + [(action_type, params, action_desc)]))
+                        queue.append((new_state,next_agent_pos, plan + [(action_type, params, action_desc)]))
         
         return None
     
@@ -744,26 +752,48 @@ class LearningAgent(Agent):
         x, y = self.grid_world.agent_pos
         return np.argmin(self.state_action_counts[x, y, :])
     
-    def interaction_loop(self, num_steps=100_000, max_timesteps = 10):
+    def interaction_loop(self, num_steps=100_000, max_timesteps = 100):
         """Interact with the environment for a number of steps"""
 
         t = 0
+  
         while t < num_steps:
             
             possible_events = self.get_possible_events()
+            
+            current_grid_pos = self.grid_world.agent_pos
+            
 
             plan = self.planner.bfs_plan(self.knowledge_base, self.goal, possible_events, self.grid_world.agent_pos)
             
-            current_grid_pos = self.grid_world.agent_pos
+            #print('----- PLANNING ----')
+            #print(f"Step {t}:")
+            #print("Current Position:", current_grid_pos)
+            #print("Knowledge Base:", self.knowledge_base)
+            #print("Possible Events:", possible_events)
+            
+
+            if t% (max_timesteps*10) == 0:
+                #print("-"*10)
+                #print(f"Step {t}: Current Position: {current_grid_pos}, Knowledge Base: {self.knowledge_base}")
+                #self._log_progress(t)
+                pass
+                
 
             if plan is not None and len(plan) > 0:
+                #print(f"Executing plan of length {len(plan)} at step {t}")
+                print(f"Executing plan {plan} at step {t}")
                 for action_type, params, action_desc in plan:
                     
                     action_event = params.get('transition_event', None)
                     event_index = [i[0] for i in enumerate(self.q_learner.all_transitions) if i[1]['prev_position'] == action_event[0] and i[1]['action']   == action_event[1] and i[1]['next_position'] == action_event[2]][0]
                     for _ in range(max_timesteps):
+                        
                         action = self.q_learner.get_policy(event_index, current_grid_pos)
                         self.step(action)
+
+                        #print(self.grid_world.grid)
+                        #time.sleep(0.5)
                         t += 1
                         next_grid_pos = self.grid_world.agent_pos
                         
@@ -776,7 +806,8 @@ class LearningAgent(Agent):
                     action = self.choose_action_count_based()
                     self.step(action)   
                     t += 1
-
+                    
+                
     def get_possible_events(self):
         """Get possible events at each position based on learned Q-tables"""
         possible_events = {}
@@ -784,8 +815,8 @@ class LearningAgent(Agent):
             for j in range(self.grid_world.grid_size):
                 pos = (i,j)
                 possible_events[pos] = []
-                for i, ev in enumerate(self.q_learner.all_transitions):
-                    if self.q_learner.q_tables[i][pos].max() > 0:
+                for idx, ev in enumerate(self.q_learner.all_transitions):
+                    if self.q_learner.q_tables[idx][pos].max() > 0:
                         possible_events[pos].append(copy.deepcopy(ev))
         return possible_events
 
@@ -828,11 +859,14 @@ class LearningAgent(Agent):
         }
     
 # Create environment and agent
-grid_world = GridWorld(num_rooms=4, room_size=3, debug=False)
+grid_world = GridWorld(num_rooms=9, room_size=3, debug=False)
 print(grid_world.grid)
-agent = LearningAgent(grid_world,goal = (1,1))
 
+agent = LearningAgent(grid_world,goal = (0,2))
+
+agent.q_learner.train(total_steps=200000)
 
 # Use simple count-based exploration
-agent.interaction_loop(num_steps=1000, max_timesteps=10)
+agent.interaction_loop(num_steps=10000, max_timesteps=10)
 #print(agent.q_learner.q_tables[0])
+print(grid_world.grid)
