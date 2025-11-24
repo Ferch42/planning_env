@@ -213,7 +213,8 @@ class GridWorld:
         return {
             'grid': grid_state,
             'room_id': self.get_current_room_id(),
-            'current_inventory': self.agent_inventory
+            'current_inventory': self.agent_inventory,
+            'at_table': self.agent_pos in self.table_positions
         }
     
     def render(self):
@@ -232,6 +233,7 @@ class Agent:
             'object_locations': set(),  # Object locations on tables
             'current_room': None,  # Track previous room to detect connections
             'current_inventory': None,  # Track inventory changes
+            'at_table': None    # Track if at table
         }
         
         # Initialize with starting room knowledge
@@ -242,6 +244,7 @@ class Agent:
 
         state = self.grid_world.get_state()
         current_room = state['room_id']
+        currently_at_table = state['at_table']
         
         
         # Mark current room as known
@@ -262,17 +265,30 @@ class Agent:
         # If we just picked up an object, remove it from object_locations
         if self.knowledge_base['current_inventory'] is None and current_inventory is not None:
             self.knowledge_base['object_locations'] = set(x for x in self.knowledge_base['object_locations'] if x[1]!= current_inventory)
+            self.knowledge_base['object_locations'].add((current_room, -1))  # Mark that the object is no longer on the table
 
         # If we just put down an object, add it to object_locations
-        elif self.knowledge_base['current_inventory'] is not None and current_inventory is None:
+        if self.knowledge_base['current_inventory'] is not None and current_inventory is None:
             # We put down an object - it should be on a table in current room
+            self.knowledge_base['object_locations'] = set(x for x in self.knowledge_base['object_locations'] if x[0]!= current_room)
             self.knowledge_base['object_locations'].add((current_room, self.knowledge_base['current_inventory']))
         
+        if self.knowledge_base['at_table'] and not currently_at_table:
+            # Agent just moved away from a table, ensure object location is updated
+            if current_inventory is None:
+                # If not holding anything, mark table as empty
+                self.knowledge_base['object_locations'] = set(x for x in self.knowledge_base['object_locations'] if x[0]!= current_room)
+                self.knowledge_base['object_locations'].add((current_room, -1))
+
+
         # Update previous inventory for next comparison
         self.knowledge_base['current_inventory'] = current_inventory
 
         # Update room tracking
         self.knowledge_base['current_room'] = current_room
+
+        # Update at_table status
+        self.knowledge_base['at_table'] = currently_at_table
     
     def step(self, action):
         """Take an action and update knowledge"""
@@ -329,6 +345,7 @@ class PlanningDomain:
         new_state = copy.deepcopy(kb_state)
         new_state['current_inventory'] = object_type
         new_state['object_locations'].remove((room, object_type))
+        new_state['object_locations'].add((room, -1))  # Mark that the object is no longer on the table
         return new_state, f"Picked up object {object_type} in room {room}"
     
     def _put_down_action(self, kb_state, object_type, room, transition_event = None):
@@ -378,8 +395,9 @@ class PlanningDomain:
         # Put down action (can only put down if no other object in the room)
         if kb_state['current_inventory'] is not None:
             # Check if there are any objects already in the current room
-            objects_in_room = any(room == current_room for room, obj_type in kb_state['object_locations'])
-            if not objects_in_room:
+            #objects_in_room = any(room == current_room for room, obj_type in kb_state['object_locations'])
+            room_empty = (current_room, -1) in kb_state['object_locations']
+            if room_empty:
                 applicable.append((ActionType.PUT_DOWN, {
                     'object_type': kb_state['current_inventory'],
                     'room': current_room
@@ -465,8 +483,9 @@ class EventAwarePlanningDomain(PlanningDomain):
 
             if kb_state['current_inventory'] is not None:
                 # Check if there are any objects already in the current room
-                objects_in_room = any(room == current_room for room, obj_type in kb_state['object_locations'])
-                if not objects_in_room:
+                #objects_in_room = any(room == current_room for room, obj_type in kb_state['object_locations'])
+                room_empty = (current_room, -1) in kb_state['object_locations']
+                if room_empty:
                     applicable.append((ActionType.PUT_DOWN, {
                         'object_type': kb_state['current_inventory'],
                         'room': current_room,
@@ -553,17 +572,12 @@ class EventAwarePlanner(Planner):
                 continue
             visited.add(state_key)
             
-            #print("Visiting state:")
-            #print(state_key)
-            #print(self.domain.get_applicable_actions(state, events, current_agent_pos))
+
             for action_type, params in self.domain.get_applicable_actions(state, events, current_agent_pos):
-                #print("Considering action:")
-                #print(action_type, params)
                 
                 new_state, result_msg = self.domain.apply_action(state, action_type, **params)
                 next_agent_pos = params.get('transition_event', (None, None, None))[2]
                 
-                #print(self._get_state_key(new_state, next_agent_pos))
                 if new_state is not None:
                     new_state_key = self._get_state_key(new_state, next_agent_pos)
                     if new_state_key not in visited:
@@ -766,19 +780,6 @@ class LearningAgent(Agent):
 
             plan = self.planner.bfs_plan(self.knowledge_base, self.goal, possible_events, self.grid_world.agent_pos)
             
-            #print('----- PLANNING ----')
-            #print(f"Step {t}:")
-            #print("Current Position:", current_grid_pos)
-            #print("Knowledge Base:", self.knowledge_base)
-            #print("Possible Events:", possible_events)
-            
-
-            if t% (max_timesteps*10) == 0:
-                #print("-"*10)
-                #print(f"Step {t}: Current Position: {current_grid_pos}, Knowledge Base: {self.knowledge_base}")
-                #self._log_progress(t)
-                pass
-                
 
             if plan is not None and len(plan) > 0:
                 #print(f"Executing plan of length {len(plan)} at step {t}")
@@ -792,8 +793,8 @@ class LearningAgent(Agent):
                         action = self.q_learner.get_policy(event_index, current_grid_pos)
                         self.step(action)
 
-                        #print(self.grid_world.grid)
-                        #time.sleep(0.5)
+                        self.grid_world.render()
+                        time.sleep(0.5)
                         t += 1
                         next_grid_pos = self.grid_world.agent_pos
                         
@@ -864,7 +865,7 @@ print(grid_world.grid)
 
 agent = LearningAgent(grid_world,goal = (0,2))
 
-agent.q_learner.train(total_steps=200000)
+agent.q_learner.train(total_steps=100000)
 
 # Use simple count-based exploration
 agent.interaction_loop(num_steps=10000, max_timesteps=10)
