@@ -461,7 +461,7 @@ class EventAwarePlanningDomain(PlanningDomain):
         selected_move_events = [x for x in move_events if x['precondition'] in filtered_connections]
         # Move actions to connected rooms
 
-        for ev in selected_move_events:
+        for ev in move_events:
             connection = ev['precondition']
             if current_room in connection:
                 other_room = connection[0] if connection[1] == current_room else connection[1]
@@ -473,7 +473,7 @@ class EventAwarePlanningDomain(PlanningDomain):
         
         applicable_pickup_events = [x for x in pick_up_events if x['precondition'] == current_room]
         
-        for ev in applicable_pickup_events:
+        for ev in pick_up_events:
 
             if kb_state['current_inventory'] is None:
                 for room, obj_type in kb_state['object_locations']:
@@ -494,7 +494,9 @@ class EventAwarePlanningDomain(PlanningDomain):
                         'room': current_room,
                         'transition_event': (ev['prev_position'], ev['action'], ev['next_position'])
                     }))
-        
+        #print("Applicable actions with events:")
+        #print(kb_state)
+        #print(applicable)
         return applicable
       
 class Planner:
@@ -557,12 +559,14 @@ class EventAwarePlanner(Planner):
         if self.domain.is_goal_state(initial_state, goal):
             return []
         
-        queue = deque([(initial_state, agent_pos, [])])
+        queue = deque([(initial_state, agent_pos, [], [agent_pos])])
         visited = set()
         
         while queue:
-            state, current_agent_pos, plan = queue.popleft()
+            state, current_agent_pos, plan, agent_pos_track = queue.popleft()
             if self.domain.is_goal_state(state, goal):
+                print("Plan found with agent position track:")
+                print(agent_pos_track)
                 return plan
             
             #print(plan)
@@ -579,13 +583,13 @@ class EventAwarePlanner(Planner):
             for action_type, params in self.domain.get_applicable_actions(state, events, current_agent_pos):
                 
                 new_state, result_msg = self.domain.apply_action(state, action_type, **params)
-                next_agent_pos = params.get('transition_event', (None, None, None))[2]
+                next_agent_pos = copy.deepcopy(params.get('transition_event', (None, None, None))[2])
                 
                 if new_state is not None:
                     new_state_key = self._get_state_key(new_state, next_agent_pos)
                     if new_state_key not in visited:
                         action_desc = f"{action_type.name}: {result_msg}"
-                        queue.append((new_state,next_agent_pos, plan + [(action_type, params, action_desc)]))
+                        queue.append((new_state,next_agent_pos, plan + [(action_type, params, action_desc)], agent_pos_track + [next_agent_pos]))
         
         return None
     
@@ -613,8 +617,16 @@ class GoalConditionedQLearning:
         
         # Create Q-tables for each transition goal
         self.q_tables = {}
+        self.transition_index = {}
+        self.transition_event = {}
         for i in range(len(self.all_transitions)):
             self.q_tables[i] = defaultdict(lambda: np.zeros(5))  # 5 actions
+            self.transition_index[(self.all_transitions[i]['prev_position'],
+                                   self.all_transitions[i]['action'],
+                                   self.all_transitions[i]['next_position'])] = i
+            self.transition_event[(self.all_transitions[i]['prev_position'],
+                                   self.all_transitions[i]['action'],
+                                   self.all_transitions[i]['next_position'])] = copy.deepcopy(self.all_transitions[i])
         
         # Simple logging
         self.transitions_activated = [0] * len(self.all_transitions)
@@ -622,10 +634,11 @@ class GoalConditionedQLearning:
     
     def check_transition_activation(self, prev_state, action, next_state):
         """Check if any important transition was activated"""
-        for i, transition in enumerate(self.all_transitions):
-            if (transition['prev_position'] == prev_state and 
-                transition['action'] == action and
-                transition['next_position'] == next_state):
+        for transition in self.transition_index.keys():
+            if (transition[0] == prev_state and 
+                transition[1] == action and
+                transition[2] == next_state):
+                i = self.transition_index[transition]
                 self.transitions_activated[i] += 1
                 return i
         return None
@@ -727,7 +740,7 @@ class LearningAgent(Agent):
         self.total_steps = 0
         
         # Simple count-based exploration: track state-action counts
-        self.state_action_counts = np.zeros((grid_world.grid_size, grid_world.grid_size, 5), dtype=int)
+        self.state_action_counts = np.zeros((grid_world.grid_size, grid_world.grid_size, 5), dtype=float) + 100
         
         # Planner
         self.planner = EventAwarePlanner(EventAwarePlanningDomain())
@@ -740,7 +753,7 @@ class LearningAgent(Agent):
         prev_state = self.grid_world.agent_pos
         
         # Update count before taking action
-        self.state_action_counts[prev_state[0], prev_state[1], action] += 1
+        #self.state_action_counts[prev_state[0], prev_state[1], action] += 1
         
         # Execute the action using parent class
         super().step(action)
@@ -761,13 +774,21 @@ class LearningAgent(Agent):
             prev_state, action, next_state, activated_transition
         )
         
+        # Update count after taking action
+        old_value = self.state_action_counts[prev_state[0], prev_state[1], action]
+        next_value = self.state_action_counts[next_state[0], next_state[1], :].max()
+        self.state_action_counts[prev_state[0], prev_state[1], action] = old_value + 0.1 * (next_value*0.999 - old_value)
+
+
         self.total_steps += 1
     
     def choose_action_count_based(self):
         """Simple count-based exploration: choose the least taken action in current state"""
         
         x, y = self.grid_world.agent_pos
-        return np.argmin(self.state_action_counts[x, y, :])
+        #return np.argmin(self.state_action_counts[x, y, :])
+        #print(self.state_action_counts[x, y, :])
+        return np.argmax(self.state_action_counts[x, y, :])
     
     def get_new_goal(self):
         """Randomly select a new goal"""
@@ -790,10 +811,10 @@ class LearningAgent(Agent):
         explore_count = 0
         while t < num_steps:
             
-            possible_events = self.get_possible_events()
+            possible_events, possible_events_idx = self.get_possible_events()
             
+            #print("SPECIAL CHARACTERS TO SHOW NEW PLANNING CYCLE ###########################")
             current_grid_pos = self.grid_world.agent_pos
-
             plan = self.planner.bfs_plan(self.knowledge_base, self.goal, possible_events, self.grid_world.agent_pos)
 
             if plan is not None and len(plan) > 0:
@@ -803,12 +824,22 @@ class LearningAgent(Agent):
                 for action_type, params, action_desc in plan:
                     
                     action_event = params.get('transition_event', None)
-                    event_index = [i[0] for i in enumerate(self.q_learner.all_transitions) if i[1]['prev_position'] == action_event[0] and i[1]['action']   == action_event[1] and i[1]['next_position'] == action_event[2]][0]
-                    
+                    #event_index = [i[0] for i in enumerate(self.q_learner.all_transitions) if i[1]['prev_position'] == action_event[0] and i[1]['action']   == action_event[1] and i[1]['next_position'] == action_event[2]][0]
+                    event_index = self.q_learner.transition_index.get(action_event, None)
                     event_completed = False
+                    
+                    #print(f"Attempting action: {action_desc}")
+                    #print(f"Current knowledge: {self.knowledge_base}")
+                    #print(f"Current position: {current_grid_pos}, Next Grid Pos: {action_event[2]}")
+                    #print(f"Event to complete: {event_index}")
+                    #print(f"Possible events at position: {possible_events}")
+                    #print(f"Possible event indices at position: {possible_events_idx}")
+                    #self.grid_world.render()
+                    
                     for _ in range(max_steps):
                         
                         action = self.q_learner.get_policy(event_index, current_grid_pos)
+                        #print(f"Chosen action: {action} at position {current_grid_pos}")
                         self.step(action)
 
                         #self.grid_world.render()
@@ -824,14 +855,18 @@ class LearningAgent(Agent):
                         
                         if (current_grid_pos, action, next_grid_pos) == action_event:
                             #print(f"Completed action: {action_desc}")
+                            #print(f"Agent current position {self.grid_world.agent_pos}")
                             #print(self.knowledge_base)
                             #self.grid_world.render()
                             event_completed = True
+                            current_grid_pos = next_grid_pos
                             break
                         current_grid_pos = next_grid_pos
 
                     if not event_completed:
                         #print(f"Failed to complete action: {action_desc}, reverting to count-based exploration")
+                        #print(current_grid_pos)
+                        #print(self.q_learner.q_tables[event_index])
                         planning_trials.append(0)
                         break
             
@@ -854,14 +889,20 @@ class LearningAgent(Agent):
     def get_possible_events(self):
         """Get possible events at each position based on learned Q-tables"""
         possible_events = {}
+        possible_events_idx = {}
         for i in range(self.grid_world.grid_size):
             for j in range(self.grid_world.grid_size):
                 pos = (i,j)
                 possible_events[pos] = []
-                for idx, ev in enumerate(self.q_learner.all_transitions):
+                possible_events_idx[pos] = []
+                for transition in self.q_learner.transition_index.keys():
+                    idx = self.q_learner.transition_index[transition]
                     if self.q_learner.q_tables[idx][pos].max() > 0:
+                        #print(self.q_learner.q_tables[idx][pos])
+                        ev = self.q_learner.transition_event[transition]
                         possible_events[pos].append(copy.deepcopy(ev))
-        return possible_events
+                        possible_events_idx[pos].append(idx)    
+        return possible_events, possible_events_idx
 
     
     def explore_count_based(self, num_steps=10000, log_interval=1000):
@@ -903,13 +944,15 @@ class LearningAgent(Agent):
     
 # Create environment and agent
 grid_world = GridWorld(num_rooms=9, room_size=3, debug=False)
-print(grid_world.grid)
+#print(grid_world.grid)
+#print([(x['prev_position'], x['action'], x['next_position'])  for x in grid_world.get_important_transitions()['door_transitions'] + grid_world.get_important_transitions()['object_transitions']])
+
 
 agent = LearningAgent(grid_world,goal = (0,2))
 
 #agent.q_learner.train(total_steps=500_000)
 
 # Use simple count-based exploration
-agent.interaction_loop(num_steps=1_000_000)
+agent.interaction_loop(num_steps=100_000)
 #print(agent.q_learner.q_tables[0])
 print(grid_world.grid)
