@@ -554,7 +554,7 @@ class EventAwarePlanner(Planner):
     def __init__(self, domain):
         super().__init__(domain)
     
-    def bfs_plan(self, initial_state, goal ,events, agent_pos, max_depth=50):
+    def bfs_plan(self, initial_state, goal ,events, agent_pos, max_depth=20):
         """Find plan using BFS with event awareness and proper goal checking"""
         if self.domain.is_goal_state(initial_state, goal):
             return []
@@ -934,8 +934,9 @@ grid_world = GridWorld(num_rooms=9, room_size=3, debug=False)
 
 
 agent = LearningAgent(grid_world,goal = (0,2))
+#agent.q_learner.train(total_steps=100_000)
 
 # Use simple count-based exploration
-agent.interaction_loop(num_steps=100_000)
+agent.interaction_loop(num_steps=10_000)
 #print(agent.q_learner.q_tables[0])
 print(grid_world.grid)
