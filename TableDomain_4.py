@@ -751,7 +751,7 @@ class LearningAgent(Agent):
         prev_state = self.grid_world.agent_pos
         
         # Update count before taking action
-        #self.state_action_counts[prev_state[0], prev_state[1], action] += 1
+        self.state_action_counts[prev_state[0], prev_state[1], action] += 1
         
         # Execute the action using parent class
         super().step(action)
@@ -773,10 +773,11 @@ class LearningAgent(Agent):
         )
         
         # Update count after taking action
+        """
         old_value = self.state_action_counts[prev_state[0], prev_state[1], action]
         next_value = self.state_action_counts[next_state[0], next_state[1], :].max()
         self.state_action_counts[prev_state[0], prev_state[1], action] = old_value + 0.1 * (next_value*0.999 - old_value)
-
+        """
 
         self.total_steps += 1
     
@@ -784,9 +785,9 @@ class LearningAgent(Agent):
         """Simple count-based exploration: choose the least taken action in current state"""
         
         x, y = self.grid_world.agent_pos
-        #return np.argmin(self.state_action_counts[x, y, :])
+        return np.argmin(self.state_action_counts[x, y, :])
         #print(self.state_action_counts[x, y, :])
-        return np.argmax(self.state_action_counts[x, y, :])
+        #return np.argmax(self.state_action_counts[x, y, :])
     
     def get_new_goal(self):
         """Randomly select a new goal"""
@@ -807,6 +808,7 @@ class LearningAgent(Agent):
         planning_trials = []
         count = 0
         explore_count = 0
+        last_goal_time = t
         while t < num_steps:
             
             possible_events, possible_events_idx = self.get_possible_events()
@@ -820,7 +822,7 @@ class LearningAgent(Agent):
                     
                     action_event = params.get('transition_event', None)
                     event_index = self.q_learner.transition_index.get(action_event, None)
-                    event_completed = False
+                    #event_completed = False
                 
                     
                     for _ in range(max_steps):
@@ -833,38 +835,43 @@ class LearningAgent(Agent):
                         next_grid_pos = self.grid_world.agent_pos
 
                         if self.planner.domain.is_goal_state(self.knowledge_base, self.goal):
-                            planning_trials.append(1)
+                            planning_trials.append(t- last_goal_time)
+                            last_goal_time = t
                             self.goal = self.get_new_goal()
                             print(f"New goal set: {self.goal}")
                             
                         
                         if (current_grid_pos, action, next_grid_pos) == action_event:
                             
-                            event_completed = True
+                            #event_completed = True
                             current_grid_pos = next_grid_pos
                             break
                         current_grid_pos = next_grid_pos
 
-                    if not event_completed:
+                    #if not event_completed:
                         
-                        planning_trials.append(0)
-                        break
+                    #    planning_trials.append(0)
+                    #    break
             
             if len(planning_trials) > count:
                 print(f"Step {t}: Percentage completed {t/ num_steps * 100:.2f}%")
-                print(f"Planning success rate: {np.mean(planning_trials[-20:])*100:.2f}% over last {len(planning_trials)} trials")
+                print(f"Goal time: {np.mean(planning_trials[-20:])} over last {len(planning_trials)} trials")
                 count = len(planning_trials)            
             
             explore_count +=1
 
             if explore_count % 10 == 0:
                 self._log_progress(t)
-            for _ in range(max_steps*100):
+
+            for _ in range(max_steps*5):
                 action = self.choose_action_count_based()
                 self.step(action)
                        
                 t += 1
-                    
+        print("Interaction loop completed!")
+        print(f"Total planning trials: {len(planning_trials)}")
+        print(planning_trials)
+
                 
     def get_possible_events(self):
         """Get possible events at each position based on learned Q-tables"""
@@ -924,13 +931,9 @@ class LearningAgent(Agent):
     
 # Create environment and agent
 grid_world = GridWorld(num_rooms=9, room_size=3, debug=False)
-#print(grid_world.grid)
-#print([(x['prev_position'], x['action'], x['next_position'])  for x in grid_world.get_important_transitions()['door_transitions'] + grid_world.get_important_transitions()['object_transitions']])
 
 
 agent = LearningAgent(grid_world,goal = (0,2))
-
-#agent.q_learner.train(total_steps=500_000)
 
 # Use simple count-based exploration
 agent.interaction_loop(num_steps=100_000)
