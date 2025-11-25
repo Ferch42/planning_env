@@ -559,14 +559,12 @@ class EventAwarePlanner(Planner):
         if self.domain.is_goal_state(initial_state, goal):
             return []
         
-        queue = deque([(initial_state, agent_pos, [], [agent_pos])])
+        queue = deque([(initial_state, agent_pos, [])])
         visited = set()
         
         while queue:
-            state, current_agent_pos, plan, agent_pos_track = queue.popleft()
+            state, current_agent_pos, plan = queue.popleft()
             if self.domain.is_goal_state(state, goal):
-                print("Plan found with agent position track:")
-                print(agent_pos_track)
                 return plan
             
             #print(plan)
@@ -589,7 +587,7 @@ class EventAwarePlanner(Planner):
                     new_state_key = self._get_state_key(new_state, next_agent_pos)
                     if new_state_key not in visited:
                         action_desc = f"{action_type.name}: {result_msg}"
-                        queue.append((new_state,next_agent_pos, plan + [(action_type, params, action_desc)], agent_pos_track + [next_agent_pos]))
+                        queue.append((new_state,next_agent_pos, plan + [(action_type, params, action_desc)]))
         
         return None
     
@@ -813,37 +811,24 @@ class LearningAgent(Agent):
             
             possible_events, possible_events_idx = self.get_possible_events()
             
-            #print("SPECIAL CHARACTERS TO SHOW NEW PLANNING CYCLE ###########################")
             current_grid_pos = self.grid_world.agent_pos
             plan = self.planner.bfs_plan(self.knowledge_base, self.goal, possible_events, self.grid_world.agent_pos)
 
             if plan is not None and len(plan) > 0:
-                #print(f"Executing plan of length {len(plan)} at step {t}")
-                #print(f"Executing plan {plan} at step {t}")
-                #print(self.knowledge_base)
+
                 for action_type, params, action_desc in plan:
                     
                     action_event = params.get('transition_event', None)
-                    #event_index = [i[0] for i in enumerate(self.q_learner.all_transitions) if i[1]['prev_position'] == action_event[0] and i[1]['action']   == action_event[1] and i[1]['next_position'] == action_event[2]][0]
                     event_index = self.q_learner.transition_index.get(action_event, None)
                     event_completed = False
-                    
-                    #print(f"Attempting action: {action_desc}")
-                    #print(f"Current knowledge: {self.knowledge_base}")
-                    #print(f"Current position: {current_grid_pos}, Next Grid Pos: {action_event[2]}")
-                    #print(f"Event to complete: {event_index}")
-                    #print(f"Possible events at position: {possible_events}")
-                    #print(f"Possible event indices at position: {possible_events_idx}")
-                    #self.grid_world.render()
+                
                     
                     for _ in range(max_steps):
                         
                         action = self.q_learner.get_policy(event_index, current_grid_pos)
-                        #print(f"Chosen action: {action} at position {current_grid_pos}")
                         self.step(action)
 
-                        #self.grid_world.render()
-                        #time.sleep(0.5)
+                        
                         t += 1
                         next_grid_pos = self.grid_world.agent_pos
 
@@ -851,22 +836,17 @@ class LearningAgent(Agent):
                             planning_trials.append(1)
                             self.goal = self.get_new_goal()
                             print(f"New goal set: {self.goal}")
-                            #print("Goal achieved!")
+                            
                         
                         if (current_grid_pos, action, next_grid_pos) == action_event:
-                            #print(f"Completed action: {action_desc}")
-                            #print(f"Agent current position {self.grid_world.agent_pos}")
-                            #print(self.knowledge_base)
-                            #self.grid_world.render()
+                            
                             event_completed = True
                             current_grid_pos = next_grid_pos
                             break
                         current_grid_pos = next_grid_pos
 
                     if not event_completed:
-                        #print(f"Failed to complete action: {action_desc}, reverting to count-based exploration")
-                        #print(current_grid_pos)
-                        #print(self.q_learner.q_tables[event_index])
+                        
                         planning_trials.append(0)
                         break
             
