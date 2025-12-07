@@ -612,10 +612,9 @@ class EventAwarePlannerRefactored(Planner):
             if current_room in connection:
                 other_room = connection[0] if connection[1] == current_room else connection[1]
                 operator_actions = self.get_operator_actions(agent_pos, (ev['prev_position'], ev['action'], ev['next_position']))
-                #print('hellos')
-                #print(operator_actions)
+
+
                 if operator_actions is not None:
-                    #print(ev)
                     applicable.append((ActionType.MOVE, {
                         'from_room': current_room,
                         'to_room': other_room,
@@ -661,12 +660,10 @@ class EventAwarePlannerRefactored(Planner):
         
         queue = deque([(initial_state, agent_pos, [], [])])
         visited = set()
-        #print(initial_state, goal, agent_pos)
-        #print(self.environment_transitions)
-        
+
         while queue:
             state, current_agent_pos, plan, plan_exectuion_actions = queue.popleft()
-            #print('Current state:', state)
+            
             if self.domain.is_goal_state(state, goal):
                 return plan, plan_exectuion_actions
             
@@ -680,13 +677,11 @@ class EventAwarePlannerRefactored(Planner):
 
             visited.add(state_key)
 
-            #print('searching for operators')
             operators = self.get_applicable_operators(state, current_agent_pos)
-            #print(f"Operators:{operators}")
 
             if operators is None:
                 continue
-            #print(operators)
+
             for action_type, params in operators:
                 
                 new_state, result_msg = self.domain.apply_action(state, action_type, **params)
@@ -810,7 +805,7 @@ class LearningAgentRefatored(Agent):
                     action = self.choose_action_count_based()
                     self.step(action)   
                     t += 1
-                    
+
                 planning_trials.append(0)
             
             
@@ -831,6 +826,7 @@ class LearningAgentRefatored(Agent):
         print(f"Total successful goal achievements: {len(cost_list)}")
         print(f"Goal cost list: {cost_list}")
         print(f"Final planning trials: {planning_trials}")
+        return cost_list, planning_trials
 
                 
     def _log_progress(self, step):
@@ -840,16 +836,25 @@ class LearningAgentRefatored(Agent):
     
 
 
-# Create environment and agent
-grid_world = GridWorld(num_rooms=9, room_size=3, debug=False)
+if __name__ == "__main__":
 
-print("Initial Grid:")
-print(grid_world.render())
+    for j in range(10):
+        
+        print(f"===== Trial {j+1} =====")
+        # Create environment and agent
+        grid_world = GridWorld(num_rooms=9, room_size=3, debug=False)
 
-agent = LearningAgentRefatored(grid_world,goal = (0,2))
-#agent.q_learner.train(total_steps=100_000)
+        print("Initial Grid:")
+        print(grid_world.render())
 
-# Use simple count-based exploration
-agent.interaction_loop(num_steps=30_000)
-#print(agent.q_learner.q_tables[0])
-print(grid_world.grid)
+        agent = LearningAgentRefatored(grid_world,goal = (0,2))
+        #agent.q_learner.train(total_steps=100_000)
+
+        # Use simple count-based exploration
+        cost_list, planning_trials = agent.interaction_loop(num_steps=10_000)
+
+        with open(f'./experiments/trial_{j+1}_costs.txt', 'w+') as f:
+            
+            f.write(str(cost_list))
+            f.write('\n')
+            f.write(str(planning_trials))
