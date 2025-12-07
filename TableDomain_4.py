@@ -805,6 +805,12 @@ class LearningAgentRefatored(Agent):
                         self.goal = self.get_new_goal()
                         print(f"New goal set: {self.goal}")
             else:
+
+                for _ in range(max_steps*10):
+                    action = self.choose_action_count_based()
+                    self.step(action)   
+                    t += 1
+                    
                 planning_trials.append(0)
             
             
@@ -819,11 +825,7 @@ class LearningAgentRefatored(Agent):
             if explore_count % 10 == 0:
                 self._log_progress(t)
 
-            for _ in range(max_steps*10):
-                action = self.choose_action_count_based()
-                self.step(action)
-                       
-                t += 1
+            
 
         print("Interaction loop completed!")
         print(f"Total successful goal achievements: {len(cost_list)}")
