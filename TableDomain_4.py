@@ -851,7 +851,7 @@ if __name__ == "__main__":
         #agent.q_learner.train(total_steps=100_000)
 
         # Use simple count-based exploration
-        cost_list, planning_trials = agent.interaction_loop(num_steps=10_000)
+        cost_list, planning_trials = agent.interaction_loop(num_steps=5_000)
 
         with open(f'./experiments/trial_{j+1}_costs.txt', 'w+') as f:
             
